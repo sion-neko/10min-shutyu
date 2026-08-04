@@ -1,20 +1,238 @@
+import { useEffect, useRef, useState } from 'react';
+import {
+  AppState,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useKeepAwake } from 'expo-keep-awake';
+import * as Haptics from 'expo-haptics';
+import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+
+const DURATION_MS = 10 * 60 * 1000;
+
+const PRAISES = [
+  'いい集中だ！',
+  '10分、やりきった。',
+  'よく始めた。\nそれが一番むずかしい。',
+  'その調子。',
+  '手が止まらないなら、\nもう10分。',
+  '今日の自分、悪くない。',
+  '10分前の自分に\n感謝しよう。',
+];
+
+type Status = 'idle' | 'running' | 'done';
+
+function formatRemaining(ms: number) {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const mm = Math.floor(totalSec / 60);
+  const ss = totalSec % 60;
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+// useKeepAwake はマウント中だけ有効になるので、カウントダウン中のみ描画して
+// 開始前・終了後は普通どおり画面が消えるようにする。
+function KeepScreenAwake() {
+  useKeepAwake();
+  return null;
+}
 
 export default function App() {
+  const { width } = useWindowDimensions();
+  const [status, setStatus] = useState<Status>('idle');
+  const [remainMs, setRemainMs] = useState(DURATION_MS);
+  const [praise, setPraise] = useState(PRAISES[0]);
+  const endAtRef = useRef(0);
+  const chime = useAudioPlayer(require('./assets/chime.wav'));
+
+  // サイレントスイッチが入っていても終了音は鳴らす。
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true });
+  }, []);
+
+  // 2回目以降は再生位置が末尾に残っているので、頭出しを待ってから鳴らす。
+  const playChime = async () => {
+    try {
+      await chime.seekTo(0);
+    } catch {
+      // 頭出しに失敗しても鳴らすことを優先する
+    }
+    chime.play();
+  };
+
+  // 残り時間は「終了時刻との差」で毎回求める。setInterval のズレが蓄積しない。
+  useEffect(() => {
+    if (status !== 'running') return;
+
+    const tick = () => {
+      const left = endAtRef.current - Date.now();
+      if (left > 0) {
+        setRemainMs(left);
+        return;
+      }
+      setRemainMs(0);
+      setPraise(PRAISES[Math.floor(Math.random() * PRAISES.length)]);
+      setStatus('done');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      playChime();
+    };
+
+    tick();
+    const id = setInterval(tick, 200);
+    return () => clearInterval(id);
+  }, [status]);
+
+  // アプリを離れたらタイマーは破棄。10分は10分、途中離脱は最初からやり直し。
+  // 'inactive'（通知センターを少し引いた等）は含めない。誤爆が厳しすぎるため。
+  useEffect(() => {
+    if (status !== 'running') return;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background') {
+        setRemainMs(DURATION_MS);
+        setStatus('idle');
+      }
+    });
+    return () => sub.remove();
+  }, [status]);
+
+  const start = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    endAtRef.current = Date.now() + DURATION_MS;
+    setRemainMs(DURATION_MS);
+    setStatus('running');
+  };
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
+    <View style={styles.root}>
+      <StatusBar style="light" hidden={status === 'running'} />
+      {status === 'running' && <KeepScreenAwake />}
+
+      {status === 'idle' && (
+        <View style={styles.center}>
+          <Text style={styles.eyebrow}>10 MIN</Text>
+          <Pressable
+            onPress={start}
+            style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}>
+            <Text style={styles.startLabel}>はじめる</Text>
+          </Pressable>
+          <Text style={styles.note}>動画も音楽もなし。{'\n'}10分だけ、手を動かす。</Text>
+        </View>
+      )}
+
+      {status === 'running' && (
+        <View style={styles.center}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={[styles.clock, { fontSize: width * 0.34 }]}>
+            {formatRemaining(remainMs)}
+          </Text>
+          <Text style={styles.hint}>アプリを離れるとリセット</Text>
+        </View>
+      )}
+
+      {status === 'done' && (
+        <View style={styles.center}>
+          <Text style={styles.eyebrow}>10 MIN 完了</Text>
+          <Text style={styles.praise}>{praise}</Text>
+          <Pressable
+            onPress={start}
+            style={({ pressed }) => [styles.againButton, pressed && styles.pressed]}>
+            <Text style={styles.againLabel}>もう10分</Text>
+          </Pressable>
+          <Pressable onPress={() => setStatus('idle')} hitSlop={16}>
+            <Text style={styles.quiet}>おわる</Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
 
+const TEXT = '#F2F2F0';
+const MUTED = 'rgba(242, 242, 240, 0.42)';
+const LINE = 'rgba(242, 242, 240, 0.28)';
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#0D0D0F',
+  },
+  center: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  eyebrow: {
+    color: MUTED,
+    fontSize: 14,
+    letterSpacing: 4,
+    marginBottom: 48,
+  },
+  startButton: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 1,
+    borderColor: LINE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startLabel: {
+    color: TEXT,
+    fontSize: 26,
+    fontWeight: '300',
+    letterSpacing: 2,
+  },
+  pressed: {
+    opacity: 0.45,
+  },
+  note: {
+    color: MUTED,
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginTop: 48,
+  },
+  clock: {
+    color: TEXT,
+    fontWeight: '200',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -2,
+  },
+  hint: {
+    color: 'rgba(242, 242, 240, 0.22)',
+    fontSize: 12,
+    marginTop: 24,
+  },
+  praise: {
+    color: TEXT,
+    fontSize: 32,
+    fontWeight: '300',
+    lineHeight: 46,
+    textAlign: 'center',
+  },
+  againButton: {
+    marginTop: 64,
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  againLabel: {
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: '300',
+    letterSpacing: 1,
+  },
+  quiet: {
+    color: MUTED,
+    fontSize: 15,
+    marginTop: 24,
   },
 });
