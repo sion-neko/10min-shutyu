@@ -3,7 +3,7 @@
     "name": "10min",
     "slug": "10min",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0D0D0F",

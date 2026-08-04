@@ -41,7 +41,7 @@ function KeepScreenAwake() {
 }
 
 export default function App() {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [status, setStatus] = useState<Status>('idle');
   const [remainMs, setRemainMs] = useState(DURATION_MS);
   const [praise, setPraise] = useState(PRAISES[0]);
@@ -105,46 +105,62 @@ export default function App() {
     setStatus('running');
   };
 
+  // 横向きは高さが一気に詰まるので、文字も余白も短い辺に合わせて縮める。
+  const isLandscape = width > height;
+  const gap = isLandscape ? 0.5 : 1;
+  const clockSize = Math.min(width * 0.34, height * 0.42);
+  const startSize = Math.min(220, height * 0.46);
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" hidden={status === 'running'} />
       {status === 'running' && <KeepScreenAwake />}
 
       {status === 'idle' && (
-        <View style={styles.center}>
-          <Text style={styles.eyebrow}>10 MIN</Text>
+        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+          <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
           <Pressable
             onPress={start}
-            style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}>
+            style={({ pressed }) => [
+              styles.startButton,
+              { width: startSize, height: startSize, borderRadius: startSize / 2 },
+              pressed && styles.pressed,
+            ]}>
             <Text style={styles.startLabel}>はじめる</Text>
           </Pressable>
-          <Text style={styles.note}>動画も音楽もなし。{'\n'}10分だけ、手を動かす。</Text>
+          <Text style={[styles.note, { marginTop: 48 * gap }]}>
+            動画も音楽もなし。{'\n'}10分だけ、手を動かす。
+          </Text>
         </View>
       )}
 
       {status === 'running' && (
-        <View style={styles.center}>
+        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
           <Text
             numberOfLines={1}
             adjustsFontSizeToFit
-            style={[styles.clock, { fontSize: width * 0.34 }]}>
+            style={[styles.clock, { fontSize: clockSize }]}>
             {formatRemaining(remainMs)}
           </Text>
-          <Text style={styles.hint}>アプリを離れるとリセット</Text>
+          <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
         </View>
       )}
 
       {status === 'done' && (
-        <View style={styles.center}>
-          <Text style={styles.eyebrow}>10 MIN 完了</Text>
-          <Text style={styles.praise}>{praise}</Text>
+        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+          <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
+          <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
           <Pressable
             onPress={start}
-            style={({ pressed }) => [styles.againButton, pressed && styles.pressed]}>
+            style={({ pressed }) => [
+              styles.againButton,
+              { marginTop: 64 * gap },
+              pressed && styles.pressed,
+            ]}>
             <Text style={styles.againLabel}>もう10分</Text>
           </Pressable>
           <Pressable onPress={() => setStatus('idle')} hitSlop={16}>
-            <Text style={styles.quiet}>おわる</Text>
+            <Text style={[styles.quiet, { marginTop: 24 * gap }]}>おわる</Text>
           </Pressable>
         </View>
       )}
@@ -167,16 +183,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
+  // 横向きのノッチ／Dynamic Island は左右に来る。実測 44pt を余裕をもって避ける。
+  centerLandscape: {
+    paddingHorizontal: 56,
+  },
   eyebrow: {
     color: MUTED,
     fontSize: 14,
     letterSpacing: 4,
-    marginBottom: 48,
   },
   startButton: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
     borderWidth: 1,
     borderColor: LINE,
     alignItems: 'center',
@@ -196,7 +212,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     textAlign: 'center',
-    marginTop: 48,
   },
   clock: {
     color: TEXT,
@@ -207,7 +222,6 @@ const styles = StyleSheet.create({
   hint: {
     color: 'rgba(242, 242, 240, 0.22)',
     fontSize: 12,
-    marginTop: 24,
   },
   praise: {
     color: TEXT,
@@ -216,8 +230,11 @@ const styles = StyleSheet.create({
     lineHeight: 46,
     textAlign: 'center',
   },
+  praiseLandscape: {
+    fontSize: 26,
+    lineHeight: 38,
+  },
   againButton: {
-    marginTop: 64,
     paddingHorizontal: 40,
     paddingVertical: 16,
     borderRadius: 999,
@@ -233,6 +250,5 @@ const styles = StyleSheet.create({
   quiet: {
     color: MUTED,
     fontSize: 15,
-    marginTop: 24,
   },
 });
