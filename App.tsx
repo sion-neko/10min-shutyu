@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AppState,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -11,8 +12,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DURATION_MS = 10 * 60 * 1000;
+const TIPS_SEEN_KEY = 'tipsSeen';
 
 const PRAISES = [
   'いい集中だ！',
@@ -40,11 +43,47 @@ function KeepScreenAwake() {
   return null;
 }
 
+function Tips({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <ScrollView style={styles.tipsScroll} contentContainerStyle={styles.tips}>
+      <Text style={styles.tipsTitle}>こんにちは！</Text>
+
+      <Text style={styles.tipsBody}>10分だけ集中するためのアプリです。</Text>
+
+      <Text style={styles.tipsBody}>
+        やる気が出るのを待っていると、だいたい何も始まらないですよね。
+        でもやる気って、動く前じゃなくて動いたあとから出てくるみたいですよ！
+        つらさのピークは始める前で、手を動かし始めると案外そうでもない、という研究もあります。
+      </Text>
+
+      <Text style={styles.tipsBody}>
+        しかも人は、10分で強制的に中断されると続きをやりたくなるそうです。
+        終わったあとにもう少しやりたくなったら、それが狙いどおりです。
+      </Text>
+
+      <Text style={styles.tipsBody}>このアプリを使って、やるべきことをやりましょう！</Text>
+
+      <Text style={styles.tipsHeading}>ルールは3つだけ</Text>
+      <Text style={styles.tipsRule}>1. 途中で止める方法はありません</Text>
+      <Text style={styles.tipsRule}>2. アプリを離れると最初からやり直しです</Text>
+      <Text style={styles.tipsRule}>3. 動画も音楽もなし。ただ10分、手を動かします</Text>
+
+      <Pressable
+        onPress={onDismiss}
+        style={({ pressed }) => [styles.tipsButton, pressed && styles.pressed]}>
+        <Text style={styles.againLabel}>わかった</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
 export default function App() {
   const { width, height } = useWindowDimensions();
   const [status, setStatus] = useState<Status>('idle');
   const [remainMs, setRemainMs] = useState(DURATION_MS);
   const [praise, setPraise] = useState(PRAISES[0]);
+  // null は読み込み中。一瞬ホーム画面が見えてから Tips が出るのを避ける。
+  const [showTips, setShowTips] = useState<boolean | null>(null);
   const endAtRef = useRef(0);
   const chime = useAudioPlayer(require('./assets/chime.wav'));
 
@@ -52,6 +91,20 @@ export default function App() {
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true });
   }, []);
+
+  // Tips は初回起動時だけ出す。読めなかったときは邪魔しない側に倒す。
+  useEffect(() => {
+    AsyncStorage.getItem(TIPS_SEEN_KEY)
+      .then((seen) => setShowTips(seen === null))
+      .catch(() => setShowTips(false));
+  }, []);
+
+  const dismissTips = () => {
+    setShowTips(false);
+    AsyncStorage.setItem(TIPS_SEEN_KEY, '1').catch(() => {
+      // 保存できなくても今回は閉じる。次回また出るだけで実害はない。
+    });
+  };
 
   // 2回目以降は再生位置が末尾に残っているので、頭出しを待ってから鳴らす。
   const playChime = async () => {
@@ -111,6 +164,15 @@ export default function App() {
   const clockSize = Math.min(width * 0.34, height * 0.42);
   const startSize = Math.min(220, height * 0.46);
 
+  if (showTips !== false) {
+    return (
+      <View style={styles.root}>
+        <StatusBar style="light" />
+        {showTips === true && <Tips onDismiss={dismissTips} />}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" hidden={status === 'running'} />
@@ -131,6 +193,9 @@ export default function App() {
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
             動画も音楽もなし。{'\n'}10分だけ、手を動かす。
           </Text>
+          <Pressable onPress={() => setShowTips(true)} hitSlop={16}>
+            <Text style={[styles.quiet, { marginTop: 24 * gap }]}>つかいかた</Text>
+          </Pressable>
         </View>
       )}
 
@@ -250,5 +315,52 @@ const styles = StyleSheet.create({
   quiet: {
     color: MUTED,
     fontSize: 15,
+  },
+  tipsScroll: {
+    flex: 1,
+  },
+  // 横向きやiPadで1行が長くなりすぎないよう幅を頭打ちにして中央に置く。
+  // ついでに横向きのノッチも避けられる。
+  tips: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignSelf: 'center',
+    maxWidth: 560,
+    paddingHorizontal: 32,
+    paddingVertical: 64,
+  },
+  tipsTitle: {
+    color: TEXT,
+    fontSize: 30,
+    fontWeight: '300',
+    marginBottom: 28,
+  },
+  tipsBody: {
+    color: 'rgba(242, 242, 240, 0.78)',
+    fontSize: 16,
+    lineHeight: 28,
+    marginBottom: 20,
+  },
+  tipsHeading: {
+    color: MUTED,
+    fontSize: 13,
+    letterSpacing: 2,
+    marginTop: 12,
+    marginBottom: 14,
+  },
+  tipsRule: {
+    color: TEXT,
+    fontSize: 16,
+    lineHeight: 26,
+    marginBottom: 10,
+  },
+  tipsButton: {
+    alignSelf: 'center',
+    marginTop: 44,
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: LINE,
   },
 });
