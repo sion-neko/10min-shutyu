@@ -379,11 +379,11 @@ export default function App() {
 
 const TEXT = '#F2F2F0';
 const MUTED = 'rgba(242, 242, 240, 0.42)';
-// 色を足さず、明るさだけで押すところを示す。暗い画面で光っているのはボタンだけ。
-// 面は少し落とした白。上に重ねる光の層との差が出て、平面ではなくドームに見える。
-const ACCENT = '#E4E4DE';
-const ACCENT_EDGE = '#FFFFFF';
-const ON_ACCENT = '#0D0D0F';
+// 画面全体が無彩色なので、色がついているのは「押すところ」だけ。迷いようがない。
+// 彩度は抑えめ。鮮やかにすると集中前の画面から浮いてしまう。
+const ACCENT = '#8FB8FF';
+const ACCENT_EDGE = '#B4D0FF';
+const ON_ACCENT = '#0A1730';
 
 const styles = StyleSheet.create({
   root: {
@@ -424,14 +424,14 @@ const styles = StyleSheet.create({
     // 暗い背景から浮き上がらせる。押し込みのアニメーションが効いて見える。
     // 強くしすぎると波紋が発光に溶けて見えなくなるので控えめに。
     shadowColor: ACCENT,
-    shadowOpacity: 0.32,
-    shadowRadius: 24,
+    shadowOpacity: 0.4,
+    shadowRadius: 26,
     shadowOffset: { width: 0, height: 10 },
     elevation: 14,
   },
   startSheen: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(255, 255, 255, 0.13)',
   },
   startLabel: {
     color: ON_ACCENT,
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   startSub: {
-    color: 'rgba(13, 13, 15, 0.45)',
+    color: 'rgba(10, 23, 48, 0.5)',
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 3,
@@ -456,8 +456,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: ACCENT_EDGE,
     shadowColor: ACCENT,
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
+    shadowOpacity: 0.34,
+    shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
   },
@@ -468,7 +468,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: '48%',
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
   },
   primaryLabel: {
     color: ON_ACCENT,
