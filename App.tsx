@@ -579,6 +579,11 @@ const MUTED = 'rgba(242, 242, 240, 0.42)';
 const ACCENT = '#8FB8FF';
 const ACCENT_EDGE = '#B4D0FF';
 const ON_ACCENT = '#0A1730';
+// 記録のドットはあえて無彩色のまま。ここに色を足すと、押してほしい丸ボタンと
+// 目線を取り合ってしまう。記録は眺めるもので、押すものではない。
+const DOT_ON = 'rgba(242, 242, 240, 0.85)';
+const DOT_OFF = 'rgba(242, 242, 240, 0.13)';
+const DOT_TODAY = 'rgba(242, 242, 240, 0.28)';
 
 const styles = StyleSheet.create({
   root: {
@@ -718,14 +723,14 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   dotDone: {
-    backgroundColor: 'rgba(242, 242, 240, 0.85)',
+    backgroundColor: DOT_ON,
   },
   dotEmpty: {
-    backgroundColor: 'rgba(242, 242, 240, 0.13)',
+    backgroundColor: DOT_OFF,
   },
   dotToday: {
     borderWidth: 1,
-    borderColor: 'rgba(242, 242, 240, 0.28)',
+    borderColor: DOT_TODAY,
   },
   recordRoot: {
     flex: 1,
