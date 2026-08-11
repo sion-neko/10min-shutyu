@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   AppState,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -43,6 +45,164 @@ function KeepScreenAwake() {
   return null;
 }
 
+// 押した瞬間に少し沈む。それだけでボタンは「触れる物」になる。
+// Reanimated は足さず RN 標準の Animated だけで組む（Expo Go 54 でそのまま動く）。
+function usePressScale(to: number) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const spring = (toValue: number) =>
+    Animated.spring(scale, {
+      toValue,
+      friction: 6,
+      tension: 260,
+      useNativeDriver: true,
+    }).start();
+
+  return {
+    scale,
+    onPressIn: () => spring(to),
+    onPressOut: () => spring(1),
+  };
+}
+
+const RIPPLE_MS = 2600;
+
+// 何も起きていない画面で唯一動いているものが、押してほしいボタン。
+function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.93);
+  const ripple1 = useRef(new Animated.Value(0)).current;
+  const ripple2 = useRef(new Animated.Value(0)).current;
+
+  // 2本の波紋を半周期ずらして流す。1本だと点滅、2本だと「広がり続けている」に見える。
+  useEffect(() => {
+    const loops = [ripple1, ripple2].map((value) =>
+      Animated.loop(
+        Animated.timing(value, {
+          toValue: 1,
+          duration: RIPPLE_MS,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ),
+    );
+
+    loops[0].start();
+    const offset = setTimeout(() => loops[1].start(), RIPPLE_MS / 2);
+    return () => {
+      clearTimeout(offset);
+      loops.forEach((loop) => loop.stop());
+    };
+  }, [ripple1, ripple2]);
+
+  const ripple = (value: Animated.Value) => ({
+    transform: [{ scale: value.interpolate({ inputRange: [0, 1], outputRange: [1, 1.42] }) }],
+    opacity: value.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.45, 0] }),
+  });
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      accessibilityRole="button"
+      accessibilityLabel="10分をはじめる"
+      style={[styles.startWrap, { width: size, height: size }]}>
+      {/* 外へ広がって消えていく波紋。「ここを押す」を無言で指している。 */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.startRing,
+          { width: size, height: size, borderRadius: size / 2 },
+          ripple(ripple1),
+        ]}
+      />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.startRing,
+          { width: size, height: size, borderRadius: size / 2 },
+          ripple(ripple2),
+        ]}
+      />
+
+      <Animated.View
+        style={[
+          styles.startButton,
+          { width: size, height: size, borderRadius: size / 2 },
+          { transform: [{ scale }] },
+        ]}>
+        {/* 上から光が当たっているように見せる面。平面だと押せる物に見えない。
+            薄い層を3枚ずらして重ね、境目を1本の線ではなく緩やかな階調にする。 */}
+        {[0.3, 0.42, 0.54].map((edge) => (
+          <View
+            key={edge}
+            pointerEvents="none"
+            style={[
+              styles.startSheen,
+              {
+                width: size * 1.5,
+                height: size * 1.5,
+                borderRadius: size * 0.75,
+                top: (edge - 1.5) * size,
+                left: -size * 0.25,
+              },
+            ]}
+          />
+        ))}
+        <Text style={styles.startLabel}>はじめる</Text>
+        <Text style={styles.startSub}>10:00</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+// 「もう10分」「わかった」など、次に進むための主ボタン。
+function PrimaryButton({
+  label,
+  onPress,
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  style?: object;
+}) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.95);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      accessibilityRole="button"
+      style={style}>
+      <Animated.View style={[styles.primaryButton, { transform: [{ scale }] }]}>
+        <View pointerEvents="none" style={styles.primarySheen} />
+        <Text style={styles.primaryLabel}>{label}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+// 目立たせたくないテキストリンク。押した手応えだけは返す。
+function QuietButton({
+  label,
+  onPress,
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  style?: object;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={16}
+      accessibilityRole="button"
+      style={({ pressed }) => pressed && styles.quietPressed}>
+      <Text style={[styles.quiet, style]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function Tips({ onDismiss }: { onDismiss: () => void }) {
   return (
     <ScrollView style={styles.tipsScroll} contentContainerStyle={styles.tips}>
@@ -68,11 +228,7 @@ function Tips({ onDismiss }: { onDismiss: () => void }) {
       <Text style={styles.tipsRule}>2. アプリを離れると最初からやり直しです</Text>
       <Text style={styles.tipsRule}>3. 動画も音楽もなし。ただ10分、手を動かします</Text>
 
-      <Pressable
-        onPress={onDismiss}
-        style={({ pressed }) => [styles.tipsButton, pressed && styles.pressed]}>
-        <Text style={styles.againLabel}>わかった</Text>
-      </Pressable>
+      <PrimaryButton label="わかった" onPress={onDismiss} style={styles.tipsButton} />
     </ScrollView>
   );
 }
@@ -181,21 +337,15 @@ export default function App() {
       {status === 'idle' && (
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
-          <Pressable
-            onPress={start}
-            style={({ pressed }) => [
-              styles.startButton,
-              { width: startSize, height: startSize, borderRadius: startSize / 2 },
-              pressed && styles.pressed,
-            ]}>
-            <Text style={styles.startLabel}>はじめる</Text>
-          </Pressable>
+          <StartButton size={startSize} onPress={start} />
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
             動画も音楽もなし。{'\n'}10分だけ、手を動かす。
           </Text>
-          <Pressable onPress={() => setShowTips(true)} hitSlop={16}>
-            <Text style={[styles.quiet, { marginTop: 24 * gap }]}>つかいかた</Text>
-          </Pressable>
+          <QuietButton
+            label="つかいかた"
+            onPress={() => setShowTips(true)}
+            style={{ marginTop: 24 * gap }}
+          />
         </View>
       )}
 
@@ -215,18 +365,12 @@ export default function App() {
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
           <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
-          <Pressable
-            onPress={start}
-            style={({ pressed }) => [
-              styles.againButton,
-              { marginTop: 64 * gap },
-              pressed && styles.pressed,
-            ]}>
-            <Text style={styles.againLabel}>もう10分</Text>
-          </Pressable>
-          <Pressable onPress={() => setStatus('idle')} hitSlop={16}>
-            <Text style={[styles.quiet, { marginTop: 24 * gap }]}>おわる</Text>
-          </Pressable>
+          <PrimaryButton label="もう10分" onPress={start} style={{ marginTop: 64 * gap }} />
+          <QuietButton
+            label="おわる"
+            onPress={() => setStatus('idle')}
+            style={{ marginTop: 24 * gap }}
+          />
         </View>
       )}
     </View>
@@ -235,7 +379,11 @@ export default function App() {
 
 const TEXT = '#F2F2F0';
 const MUTED = 'rgba(242, 242, 240, 0.42)';
-const LINE = 'rgba(242, 242, 240, 0.28)';
+// 画面全体が無彩色なので、色がついているのは「押すところ」だけ。迷いようがない。
+// 彩度は抑えめ。鮮やかにすると集中前の画面から浮いてしまう。
+const ACCENT = '#8FB8FF';
+const ACCENT_EDGE = '#B4D0FF';
+const ON_ACCENT = '#0A1730';
 
 const styles = StyleSheet.create({
   root: {
@@ -257,20 +405,80 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 4,
   },
-  startButton: {
-    borderWidth: 1,
-    borderColor: LINE,
+  startWrap: {
     alignItems: 'center',
     justifyContent: 'center',
   },
+  startRing: {
+    position: 'absolute',
+    borderWidth: 1.5,
+    borderColor: ACCENT,
+  },
+  startButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    backgroundColor: ACCENT,
+    borderWidth: 1,
+    borderColor: ACCENT_EDGE,
+    // 暗い背景から浮き上がらせる。押し込みのアニメーションが効いて見える。
+    // 強くしすぎると波紋が発光に溶けて見えなくなるので控えめに。
+    shadowColor: ACCENT,
+    shadowOpacity: 0.4,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 14,
+  },
+  startSheen: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255, 255, 255, 0.13)',
+  },
   startLabel: {
-    color: TEXT,
-    fontSize: 26,
-    fontWeight: '300',
+    color: ON_ACCENT,
+    fontSize: 28,
+    fontWeight: '600',
     letterSpacing: 2,
   },
-  pressed: {
-    opacity: 0.45,
+  startSub: {
+    color: 'rgba(10, 23, 48, 0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 3,
+    marginTop: 6,
+    fontVariant: ['tabular-nums'],
+  },
+  primaryButton: {
+    paddingHorizontal: 44,
+    paddingVertical: 17,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: ACCENT,
+    borderWidth: 1,
+    borderColor: ACCENT_EDGE,
+    shadowColor: ACCENT,
+    shadowOpacity: 0.34,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  // 丸ボタンと同じく、上半分だけ明るくして厚みを出す。
+  primarySheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '48%',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  primaryLabel: {
+    color: ON_ACCENT,
+    fontSize: 18,
+    fontWeight: '600',
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+  quietPressed: {
+    opacity: 0.5,
   },
   note: {
     color: MUTED,
@@ -298,19 +506,6 @@ const styles = StyleSheet.create({
   praiseLandscape: {
     fontSize: 26,
     lineHeight: 38,
-  },
-  againButton: {
-    paddingHorizontal: 40,
-    paddingVertical: 16,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: LINE,
-  },
-  againLabel: {
-    color: TEXT,
-    fontSize: 18,
-    fontWeight: '300',
-    letterSpacing: 1,
   },
   quiet: {
     color: MUTED,
@@ -357,10 +552,5 @@ const styles = StyleSheet.create({
   tipsButton: {
     alignSelf: 'center',
     marginTop: 44,
-    paddingHorizontal: 40,
-    paddingVertical: 16,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: LINE,
   },
 });
