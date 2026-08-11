@@ -30,6 +30,7 @@ import {
   parseClearedDays,
   streakOf,
   today,
+  weekdayLabelOf,
 } from './record';
 
 const DURATION_MS = 10 * 60 * 1000;
@@ -475,10 +476,9 @@ export default function App() {
   const gap = isLandscape ? 0.5 : 1;
   const clockSize = Math.min(width * 0.34, height * 0.42);
   const startSize = Math.min(220, height * 0.46);
-  // safe-area のライブラリは入れずに済ませる。横向きのノッチは左右に来るので
-  // 上に必要な余白は縦向きのときだけ。
-  const topInset =
-    Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 0 : isLandscape ? 12 : 56;
+  // safe-area のライブラリは入れずに済ませる。この余白を使うドット列は
+  // 縦向きでしか出さないので、縦向きのぶんだけ考えればいい。
+  const topInset = Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 0 : 56;
 
   if (showTips !== false) {
     return (
@@ -510,11 +510,11 @@ export default function App() {
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
             動画も音楽もなし。{'\n'}10分だけ、手を動かす。
           </Text>
-          <QuietButton
-            label="つかいかた"
-            onPress={() => setShowTips(true)}
-            style={{ marginTop: 24 * gap }}
-          />
+          {/* 横向きではドット列を出せないので、きろくへの入口はここにも置く。 */}
+          <View style={[styles.quietRow, { marginTop: 24 * gap }]}>
+            <QuietButton label="つかいかた" onPress={() => setShowTips(true)} />
+            <QuietButton label="きろく" onPress={() => setShowRecord(true)} />
+          </View>
         </View>
       )}
 
@@ -545,8 +545,9 @@ export default function App() {
 
       {/* 直近1週間は開かなくても見える位置に。中央の配置は動かしたくないので絶対配置。
           兄弟は後に書いたほうが上に乗るので、必ず中央のブロックより後ろに置く。
-          先に書くと絶対配置でも中央ブロックの下敷きになり、タップが届かない。 */}
-      {status === 'idle' && (
+          先に書くと絶対配置でも中央ブロックの下敷きになり、タップが届かない。
+          横向きは縦の余白がなく「10 MIN」と重なるので出さない。 */}
+      {status === 'idle' && !isLandscape && (
         <Pressable
           onPress={() => setShowRecord(true)}
           hitSlop={16}
@@ -557,14 +558,19 @@ export default function App() {
             { paddingTop: topInset + 12 },
             pressed && styles.quietPressed,
           ]}>
-          {lastDays(WEEK_DAYS).map((date, i) => (
-            <Dot
-              key={dayKey(date)}
-              done={cleared.has(dayKey(date))}
-              isToday={i === WEEK_DAYS - 1}
-              size={8}
-            />
-          ))}
+          {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
+              曜日を添えると一目で「日付の並び」になる。 */}
+          {lastDays(WEEK_DAYS).map((date, i) => {
+            const isToday = i === WEEK_DAYS - 1;
+            return (
+              <View key={dayKey(date)} style={styles.weekDay}>
+                <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
+                  {weekdayLabelOf(date)}
+                </Text>
+                <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
+              </View>
+            );
+          })}
         </Pressable>
       )}
     </View>
@@ -584,6 +590,7 @@ const ON_ACCENT = '#0A1730';
 const DOT_ON = 'rgba(242, 242, 240, 0.85)';
 const DOT_OFF = 'rgba(242, 242, 240, 0.13)';
 const DOT_TODAY = 'rgba(242, 242, 240, 0.28)';
+const WEEKDAY = 'rgba(242, 242, 240, 0.3)';
 
 const styles = StyleSheet.create({
   root: {
@@ -719,8 +726,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     paddingBottom: 12,
+  },
+  quietRow: {
+    flexDirection: 'row',
+    gap: 32,
+  },
+  weekDay: {
+    alignItems: 'center',
+    gap: 5,
+  },
+  weekDayLabel: {
+    color: WEEKDAY,
+    fontSize: 9,
+  },
+  // 右端が今日。曜日だけ明るくして、どちら向きに時間が流れているかを示す。
+  weekDayLabelToday: {
+    color: MUTED,
   },
   dotDone: {
     backgroundColor: DOT_ON,
@@ -822,7 +845,7 @@ const styles = StyleSheet.create({
   },
   weekdayLabel: {
     width: 14,
-    color: 'rgba(242, 242, 240, 0.3)',
+    color: WEEKDAY,
     fontSize: 10,
     textAlign: 'center',
   },

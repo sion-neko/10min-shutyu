@@ -39,6 +39,11 @@ export function streakOf(cleared: Set<string>) {
   return count;
 }
 
+// getDay() は日曜が0。月曜はじまりの WEEKDAY_LABELS に合わせてずらす。
+export function weekdayLabelOf(d: Date) {
+  return WEEKDAY_LABELS[(d.getDay() + 6) % 7];
+}
+
 // 古い順に count 日ぶん。最後の要素が今日。
 export function lastDays(count: number) {
   const base = today();
