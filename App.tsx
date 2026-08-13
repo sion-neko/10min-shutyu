@@ -545,6 +545,7 @@ export default function App() {
   // safe-area のライブラリは入れずに済ませる。この余白を使うドット列は
   // 縦向きでしか出さないので、縦向きのぶんだけ考えればいい。
   const topInset = Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 0 : 56;
+  const streak = streakOf(cleared);
 
   if (showTips !== false) {
     return (
@@ -618,7 +619,7 @@ export default function App() {
           onPress={() => setShowRecord(true)}
           hitSlop={16}
           accessibilityRole="button"
-          accessibilityLabel="きろくを見る"
+          accessibilityLabel={streak > 0 ? `きろくを見る。連続${streak}日` : 'きろくを見る'}
           style={({ pressed }) => [
             styles.weekStrip,
             { paddingTop: topInset + 12 },
@@ -626,17 +627,26 @@ export default function App() {
           ]}>
           {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
               曜日を添えると一目で「日付の並び」になる。 */}
-          {lastDays(WEEK_DAYS).map((date, i) => {
-            const isToday = i === WEEK_DAYS - 1;
-            return (
-              <View key={dayKey(date)} style={styles.weekDay}>
-                <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
-                  {weekdayLabelOf(date)}
-                </Text>
-                <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
-              </View>
-            );
-          })}
+          <View style={styles.weekDays}>
+            {lastDays(WEEK_DAYS).map((date, i) => {
+              const isToday = i === WEEK_DAYS - 1;
+              return (
+                <View key={dayKey(date)} style={styles.weekDay}>
+                  <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
+                    {weekdayLabelOf(date)}
+                  </Text>
+                  <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
+                </View>
+              );
+            })}
+          </View>
+
+          {/* 0日のときは出さない。まだ何もしていない人に0を突きつけても仕方ない。 */}
+          {streak > 0 && (
+            <Text style={styles.streak}>
+              連続 <Text style={styles.streakValue}>{streak}</Text> 日
+            </Text>
+          )}
         </Pressable>
       )}
     </View>
@@ -794,11 +804,23 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     paddingBottom: 12,
+  },
+  weekDays: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  streak: {
+    color: MUTED,
+    fontSize: 12,
+  },
+  streakValue: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
   quietRow: {
     flexDirection: 'row',
