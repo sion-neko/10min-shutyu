@@ -206,7 +206,15 @@ function PrimaryButton({
       accessibilityRole="button"
       style={style}>
       <Animated.View style={[styles.primaryButton, { transform: [{ scale }] }]}>
-        <View pointerEvents="none" style={styles.primarySheen} />
+        {/* 丸ボタンと同じ考え方で、高さちがいの層を重ねて境目をぼかす。
+            1枚だと濃い青の上で1本の線に見えてしまう。 */}
+        {[0.34, 0.44, 0.54].map((height) => (
+          <View
+            key={height}
+            pointerEvents="none"
+            style={[styles.primarySheen, { height: `${height * 100}%` }]}
+          />
+        ))}
         <Text style={styles.primaryLabel}>{label}</Text>
       </Animated.View>
     </Pressable>
@@ -483,7 +491,7 @@ export default function App() {
   if (showTips !== false) {
     return (
       <View style={styles.root}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         {showTips === true && <Tips onDismiss={dismissTips} />}
       </View>
     );
@@ -492,7 +500,7 @@ export default function App() {
   if (showRecord) {
     return (
       <View style={styles.root}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <Record cleared={cleared} onDismiss={() => setShowRecord(false)} />
       </View>
     );
@@ -500,7 +508,7 @@ export default function App() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" hidden={status === 'running'} />
+      <StatusBar style="dark" hidden={status === 'running'} />
       {status === 'running' && <KeepScreenAwake />}
 
       {status === 'idle' && (
@@ -577,20 +585,25 @@ export default function App() {
   );
 }
 
-const BG = '#0D0D0F';
-const TEXT = '#F2F2F0';
-const MUTED = 'rgba(242, 242, 240, 0.42)';
-// 画面全体が無彩色なので、色がついているのは「押すところ」だけ。迷いようがない。
-// 彩度は抑えめ。鮮やかにすると集中前の画面から浮いてしまう。
-const ACCENT = '#8FB8FF';
-const ACCENT_EDGE = '#B4D0FF';
-const ON_ACCENT = '#0A1730';
-// 記録のドットはあえて無彩色のまま。ここに色を足すと、押してほしい丸ボタンと
-// 目線を取り合ってしまう。記録は眺めるもので、押すものではない。
-const DOT_ON = 'rgba(242, 242, 240, 0.85)';
-const DOT_OFF = 'rgba(242, 242, 240, 0.13)';
-const DOT_TODAY = 'rgba(242, 242, 240, 0.28)';
-const WEEKDAY = 'rgba(242, 242, 240, 0.3)';
+// ほんのり青みのある明るい灰。純白より目が疲れず、白いカードや
+// ボタンの影が沈んで見える。
+const BG = '#F3F6FC';
+// 黒ではなく濃紺。背景の青みと同じ側に寄せると画面がひとつにまとまる。
+const INK = '#16234A';
+const TEXT = INK;
+const MUTED = 'rgba(22, 35, 74, 0.65)';
+// 画面のほとんどが背景と同じ青みの濃淡なので、はっきり色がついているのは
+// 「押すところ」だけ。迷いようがない。
+// 明るい背景では淡い青は沈むので、暗い背景のときより濃いほうへ振る。
+const ACCENT = '#2F6FE4';
+const ACCENT_EDGE = '#5B8DEF';
+const ON_ACCENT = '#FFFFFF';
+// 記録のドットはあえて色を持たせない。ここに青を足すと、押してほしい
+// 丸ボタンと目線を取り合ってしまう。記録は眺めるもので、押すものではない。
+const DOT_ON = 'rgba(22, 35, 74, 0.72)';
+const DOT_OFF = 'rgba(22, 35, 74, 0.1)';
+const DOT_TODAY = 'rgba(22, 35, 74, 0.28)';
+const WEEKDAY = 'rgba(22, 35, 74, 0.5)';
 
 const styles = StyleSheet.create({
   root: {
@@ -636,9 +649,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 14,
   },
+  // 濃い青の上では白の層がそのまま縞に見えるので、暗い背景のときより薄くする。
   startSheen: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.13)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   startLabel: {
     color: ON_ACCENT,
@@ -647,7 +661,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   startSub: {
-    color: 'rgba(10, 23, 48, 0.5)',
+    color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 3,
@@ -668,14 +682,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
   },
-  // 丸ボタンと同じく、上半分だけ明るくして厚みを出す。
+  // 上ほど明るくして厚みを出す。高さは重ねる側で決める。
   primarySheen: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: '48%',
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   primaryLabel: {
     color: ON_ACCENT,
@@ -700,7 +713,7 @@ const styles = StyleSheet.create({
     letterSpacing: -2,
   },
   hint: {
-    color: 'rgba(242, 242, 240, 0.22)',
+    color: 'rgba(22, 35, 74, 0.4)',
     fontSize: 12,
   },
   praise: {
@@ -876,7 +889,7 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   tipsBody: {
-    color: 'rgba(242, 242, 240, 0.78)',
+    color: 'rgba(22, 35, 74, 0.78)',
     fontSize: 16,
     lineHeight: 28,
     marginBottom: 20,
