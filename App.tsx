@@ -242,33 +242,91 @@ function QuietButton({
   );
 }
 
-function Tips({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <ScrollView style={styles.tipsScroll} contentContainerStyle={styles.tips}>
+// 1枚に詰めると読むのがつらいので、話の切れ目でページを分ける。
+// 文面は変えていない。
+function tipsPages() {
+  return [
+    <>
       <Text style={styles.tipsTitle}>こんにちは！</Text>
-
       <Text style={styles.tipsBody}>10分だけ集中するためのアプリです。</Text>
-
+    </>,
+    <>
+      <Text style={styles.tipsTitle}>やる気は、あとから出てくる</Text>
       <Text style={styles.tipsBody}>
         やる気が出るのを待っていると、だいたい何も始まらないですよね。
         でもやる気って、動く前じゃなくて動いたあとから出てくるみたいですよ！
         つらさのピークは始める前で、手を動かし始めると案外そうでもない、という研究もあります。
       </Text>
-
+    </>,
+    <>
+      <Text style={styles.tipsTitle}>10分で、わざと止める</Text>
       <Text style={styles.tipsBody}>
         しかも人は、10分で強制的に中断されると続きをやりたくなるそうです。
         終わったあとにもう少しやりたくなったら、それが狙いどおりです。
       </Text>
-
       <Text style={styles.tipsBody}>このアプリを使って、やるべきことをやりましょう！</Text>
-
-      <Text style={styles.tipsHeading}>ルールは3つだけ</Text>
+    </>,
+    <>
+      <Text style={styles.tipsTitle}>ルールは3つだけ</Text>
       <Text style={styles.tipsRule}>1. 途中で止める方法はありません</Text>
       <Text style={styles.tipsRule}>2. アプリを離れると最初からやり直しです</Text>
       <Text style={styles.tipsRule}>3. 動画も音楽もなし。ただ10分、手を動かします</Text>
+    </>,
+  ];
+}
 
-      <PrimaryButton label="わかった" onPress={onDismiss} style={styles.tipsButton} />
-    </ScrollView>
+function Tips({ onDismiss }: { onDismiss: () => void }) {
+  const { width } = useWindowDimensions();
+  const [page, setPage] = useState(0);
+  const pager = useRef<ScrollView>(null);
+  const pages = tipsPages();
+  const lastPage = pages.length - 1;
+
+  // 回転で幅が変わると、ページ何枚ぶんずれた位置に取り残される。合わせ直す。
+  useEffect(() => {
+    pager.current?.scrollTo({ x: page * width, animated: false });
+  }, [width]);
+
+  const goTo = (next: number) => {
+    const clamped = Math.max(0, Math.min(lastPage, next));
+    setPage(clamped);
+    pager.current?.scrollTo({ x: clamped * width, animated: true });
+  };
+
+  return (
+    <View style={styles.tipsRoot}>
+      <ScrollView
+        ref={pager}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        // 慣性の終わりではなく位置そのものから今のページを決める。
+        // ゆっくり払うと慣性が出ず、onMomentumScrollEnd は来ないことがある。
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          const next = Math.round(e.nativeEvent.contentOffset.x / width);
+          if (next !== page && next >= 0 && next <= lastPage) setPage(next);
+        }}>
+        {pages.map((content, i) => (
+          // 横向きや小さい端末で1枚に収まらないときのために、中も縦に流せるようにする。
+          <ScrollView key={i} style={{ width }} contentContainerStyle={styles.tipsPage}>
+            {content}
+          </ScrollView>
+        ))}
+      </ScrollView>
+
+      <View style={styles.tipsFooter}>
+        <View style={styles.tipsDots}>
+          {pages.map((_, i) => (
+            <View key={i} style={[styles.tipsDot, i === page && styles.tipsDotOn]} />
+          ))}
+        </View>
+        <PrimaryButton
+          label={page === lastPage ? 'わかった' : 'つぎへ'}
+          onPress={() => (page === lastPage ? onDismiss() : goTo(page + 1))}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -869,18 +927,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
-  tipsScroll: {
+  tipsRoot: {
     flex: 1,
   },
   // 横向きやiPadで1行が長くなりすぎないよう幅を頭打ちにして中央に置く。
   // ついでに横向きのノッチも避けられる。
-  tips: {
+  tipsPage: {
     flexGrow: 1,
     justifyContent: 'center',
     alignSelf: 'center',
     maxWidth: 560,
     paddingHorizontal: 32,
-    paddingVertical: 64,
+    paddingVertical: 48,
   },
   tipsTitle: {
     color: TEXT,
@@ -894,21 +952,29 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     marginBottom: 20,
   },
-  tipsHeading: {
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 2,
-    marginTop: 12,
-    marginBottom: 14,
-  },
   tipsRule: {
     color: TEXT,
     fontSize: 16,
     lineHeight: 26,
     marginBottom: 10,
   },
-  tipsButton: {
-    alignSelf: 'center',
-    marginTop: 44,
+  // ページを送っても動かない位置に置く。何枚あって今どこかが常に見える。
+  tipsFooter: {
+    alignItems: 'center',
+    paddingBottom: 40,
+    gap: 24,
+  },
+  tipsDots: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  tipsDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: DOT_OFF,
+  },
+  tipsDotOn: {
+    backgroundColor: DOT_ON,
   },
 });
