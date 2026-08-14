@@ -541,11 +541,15 @@ export default function App() {
   const isLandscape = width > height;
   const gap = isLandscape ? 0.5 : 1;
   const clockSize = Math.min(width * 0.34, height * 0.42);
-  const startSize = Math.min(220, height * 0.46);
-  // safe-area のライブラリは入れずに済ませる。この余白を使うドット列は
+  // safe-area のライブラリは入れずに済ませる。この余白を使う帯は
   // 縦向きでしか出さないので、縦向きのぶんだけ考えればいい。
   const topInset = Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 0 : 56;
   const streak = streakOf(cleared);
+  // 丸ボタンは画面の高さではなく「帯を引いた残り」から決める。全体の高さで
+  // 決めると、背の低い端末で下の「つかいかた／きろく」が画面外に出る。
+  // 帯の実測ではなく目安でよく、縮めるべきかどうかが分かれば足りる。
+  const stripHeight = isLandscape ? 0 : topInset + 160;
+  const startSize = Math.min(220, (height - stripHeight) * 0.46);
 
   if (showTips !== false) {
     return (
@@ -569,6 +573,51 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar style="dark" hidden={status === 'running'} />
       {status === 'running' && <KeepScreenAwake />}
+
+      {/* 連続日数と直近1週間。開かなくても見える位置に置く。
+          場所を取る帯なので絶対配置にはしない。重ねると小さい端末で
+          「10 MIN」の上に乗ってしまう。ここで高さを取り、残りを中央が使う。
+          横向きは縦の余白がないので、この帯ごと出さない。 */}
+      {status === 'idle' && !isLandscape && (
+        <Pressable
+          onPress={() => setShowRecord(true)}
+          hitSlop={16}
+          accessibilityRole="button"
+          accessibilityLabel={streak > 0 ? `きろくを見る。連続${streak}日` : 'きろくを見る'}
+          style={({ pressed }) => [
+            styles.weekStrip,
+            { paddingTop: topInset + 12 },
+            pressed && styles.quietPressed,
+          ]}>
+          {/* きろく画面と同じ組みにして、同じ数字がどこでも同じ顔で出るようにする。
+              0日のときは出さない。まだ何もしていない人に0を突きつけても仕方ない。 */}
+          {streak > 0 && (
+            <View style={styles.count}>
+              <Text style={styles.countLabel}>連続</Text>
+              <Text style={styles.countValue}>
+                {streak}
+                <Text style={styles.countUnit}> 日</Text>
+              </Text>
+            </View>
+          )}
+
+          {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
+              曜日を添えると一目で「日付の並び」になる。 */}
+          <View style={styles.weekDays}>
+            {lastDays(WEEK_DAYS).map((date, i) => {
+              const isToday = i === WEEK_DAYS - 1;
+              return (
+                <View key={dayKey(date)} style={styles.weekDay}>
+                  <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
+                    {weekdayLabelOf(date)}
+                  </Text>
+                  <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
+                </View>
+              );
+            })}
+          </View>
+        </Pressable>
+      )}
 
       {status === 'idle' && (
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
@@ -610,45 +659,6 @@ export default function App() {
         </View>
       )}
 
-      {/* 直近1週間は開かなくても見える位置に。中央の配置は動かしたくないので絶対配置。
-          兄弟は後に書いたほうが上に乗るので、必ず中央のブロックより後ろに置く。
-          先に書くと絶対配置でも中央ブロックの下敷きになり、タップが届かない。
-          横向きは縦の余白がなく「10 MIN」と重なるので出さない。 */}
-      {status === 'idle' && !isLandscape && (
-        <Pressable
-          onPress={() => setShowRecord(true)}
-          hitSlop={16}
-          accessibilityRole="button"
-          accessibilityLabel={streak > 0 ? `きろくを見る。連続${streak}日` : 'きろくを見る'}
-          style={({ pressed }) => [
-            styles.weekStrip,
-            { paddingTop: topInset + 12 },
-            pressed && styles.quietPressed,
-          ]}>
-          {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
-              曜日を添えると一目で「日付の並び」になる。 */}
-          <View style={styles.weekDays}>
-            {lastDays(WEEK_DAYS).map((date, i) => {
-              const isToday = i === WEEK_DAYS - 1;
-              return (
-                <View key={dayKey(date)} style={styles.weekDay}>
-                  <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
-                    {weekdayLabelOf(date)}
-                  </Text>
-                  <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
-                </View>
-              );
-            })}
-          </View>
-
-          {/* 0日のときは出さない。まだ何もしていない人に0を突きつけても仕方ない。 */}
-          {streak > 0 && (
-            <Text style={styles.streak}>
-              連続 <Text style={styles.streakValue}>{streak}</Text> 日
-            </Text>
-          )}
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -800,27 +810,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   weekStrip: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
     alignItems: 'center',
-    gap: 10,
+    gap: 16,
     paddingBottom: 12,
   },
   weekDays: {
     flexDirection: 'row',
     gap: 12,
-  },
-  streak: {
-    color: MUTED,
-    fontSize: 12,
-  },
-  streakValue: {
-    color: TEXT,
-    fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
   },
   quietRow: {
     flexDirection: 'row',
