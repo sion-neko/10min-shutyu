@@ -3,8 +3,10 @@ import {
   Animated,
   AppState,
   Easing,
+  Platform,
   Pressable,
   ScrollView,
+  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   View,
@@ -16,8 +18,24 @@ import * as Haptics from 'expo-haptics';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import {
+  WEEKDAY_LABELS,
+  WEEK_DAYS,
+  countInMonth,
+  dayKey,
+  lastDays,
+  monthLabel,
+  monthWeeks,
+  monthsToShow,
+  parseClearedDays,
+  streakOf,
+  today,
+  weekdayLabelOf,
+} from './record';
+
 const DURATION_MS = 10 * 60 * 1000;
 const TIPS_SEEN_KEY = 'tipsSeen';
+const CLEARED_DAYS_KEY = 'clearedDays';
 
 const PRAISES = [
   'いい集中だ！',
@@ -36,6 +54,19 @@ function formatRemaining(ms: number) {
   const mm = Math.floor(totalSec / 60);
   const ss = totalSec % 60;
   return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+function Dot({ done, isToday, size }: { done: boolean; isToday: boolean; size: number }) {
+  return (
+    <View
+      style={[
+        { width: size, height: size, borderRadius: size / 2 },
+        done ? styles.dotDone : styles.dotEmpty,
+        // 今日だけ輪郭をつけて、右端がどこまで進んだのかを分かるようにする。
+        isToday && !done && styles.dotToday,
+      ]}
+    />
+  );
 }
 
 // useKeepAwake はマウント中だけ有効になるので、カウントダウン中のみ描画して
@@ -175,7 +206,15 @@ function PrimaryButton({
       accessibilityRole="button"
       style={style}>
       <Animated.View style={[styles.primaryButton, { transform: [{ scale }] }]}>
-        <View pointerEvents="none" style={styles.primarySheen} />
+        {/* 丸ボタンと同じ考え方で、高さちがいの層を重ねて境目をぼかす。
+            1枚だと濃い青の上で1本の線に見えてしまう。 */}
+        {[0.34, 0.44, 0.54].map((height) => (
+          <View
+            key={height}
+            pointerEvents="none"
+            style={[styles.primarySheen, { height: `${height * 100}%` }]}
+          />
+        ))}
         <Text style={styles.primaryLabel}>{label}</Text>
       </Animated.View>
     </Pressable>
@@ -203,33 +242,189 @@ function QuietButton({
   );
 }
 
-function Tips({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <ScrollView style={styles.tipsScroll} contentContainerStyle={styles.tips}>
+// 1枚に詰めると読むのがつらいので、話の切れ目でページを分ける。
+// 文面は変えていない。
+function tipsPages() {
+  return [
+    <>
       <Text style={styles.tipsTitle}>こんにちは！</Text>
-
       <Text style={styles.tipsBody}>10分だけ集中するためのアプリです。</Text>
-
+    </>,
+    <>
+      <Text style={styles.tipsTitle}>やる気は、あとから出てくる</Text>
       <Text style={styles.tipsBody}>
         やる気が出るのを待っていると、だいたい何も始まらないですよね。
         でもやる気って、動く前じゃなくて動いたあとから出てくるみたいですよ！
         つらさのピークは始める前で、手を動かし始めると案外そうでもない、という研究もあります。
       </Text>
-
+    </>,
+    <>
+      <Text style={styles.tipsTitle}>10分で、わざと止める</Text>
       <Text style={styles.tipsBody}>
         しかも人は、10分で強制的に中断されると続きをやりたくなるそうです。
         終わったあとにもう少しやりたくなったら、それが狙いどおりです。
       </Text>
-
       <Text style={styles.tipsBody}>このアプリを使って、やるべきことをやりましょう！</Text>
-
-      <Text style={styles.tipsHeading}>ルールは3つだけ</Text>
+    </>,
+    <>
+      <Text style={styles.tipsTitle}>ルールは3つだけ</Text>
       <Text style={styles.tipsRule}>1. 途中で止める方法はありません</Text>
       <Text style={styles.tipsRule}>2. アプリを離れると最初からやり直しです</Text>
       <Text style={styles.tipsRule}>3. 動画も音楽もなし。ただ10分、手を動かします</Text>
+    </>,
+  ];
+}
 
-      <PrimaryButton label="わかった" onPress={onDismiss} style={styles.tipsButton} />
-    </ScrollView>
+function Tips({ onDismiss }: { onDismiss: () => void }) {
+  const { width } = useWindowDimensions();
+  const [page, setPage] = useState(0);
+  const pager = useRef<ScrollView>(null);
+  const pages = tipsPages();
+  const lastPage = pages.length - 1;
+
+  // 回転で幅が変わると、ページ何枚ぶんずれた位置に取り残される。合わせ直す。
+  useEffect(() => {
+    pager.current?.scrollTo({ x: page * width, animated: false });
+  }, [width]);
+
+  const goTo = (next: number) => {
+    const clamped = Math.max(0, Math.min(lastPage, next));
+    setPage(clamped);
+    pager.current?.scrollTo({ x: clamped * width, animated: true });
+  };
+
+  return (
+    <View style={styles.tipsRoot}>
+      <ScrollView
+        ref={pager}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        // 慣性の終わりではなく位置そのものから今のページを決める。
+        // ゆっくり払うと慣性が出ず、onMomentumScrollEnd は来ないことがある。
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          const next = Math.round(e.nativeEvent.contentOffset.x / width);
+          if (next !== page && next >= 0 && next <= lastPage) setPage(next);
+        }}>
+        {pages.map((content, i) => (
+          // 横向きや小さい端末で1枚に収まらないときのために、中も縦に流せるようにする。
+          <ScrollView key={i} style={{ width }} contentContainerStyle={styles.tipsPage}>
+            {content}
+          </ScrollView>
+        ))}
+      </ScrollView>
+
+      <View style={styles.tipsFooter}>
+        <View style={styles.tipsDots}>
+          {pages.map((_, i) => (
+            <View key={i} style={[styles.tipsDot, i === page && styles.tipsDotOn]} />
+          ))}
+        </View>
+        <PrimaryButton
+          label={page === lastPage ? 'わかった' : 'つぎへ'}
+          onPress={() => (page === lastPage ? onDismiss() : goTo(page + 1))}
+        />
+      </View>
+    </View>
+  );
+}
+
+function MonthCalendar({
+  year,
+  month,
+  cleared,
+  todayKey,
+}: {
+  year: number;
+  month: number;
+  cleared: Set<string>;
+  todayKey: string;
+}) {
+  return (
+    <View style={styles.month}>
+      <View style={styles.monthHeader}>
+        <Text style={styles.monthLabel}>{monthLabel(year, month)}</Text>
+        <Text style={styles.monthCount}>{countInMonth(cleared, year, month)}日</Text>
+      </View>
+
+      {monthWeeks(year, month, todayKey).map((week, row) => (
+        <View key={row} style={styles.gridRow}>
+          {week.map((date, col) => {
+            // 月の前後にはみ出したマスと未来の日は、場所だけ空けて何も描かない。
+            const key = date && dayKey(date);
+            if (!key || key > todayKey) {
+              return <View key={col} style={styles.gridCell} />;
+            }
+            return (
+              <View key={col} style={styles.gridCell}>
+                <Dot done={cleared.has(key)} isToday={key === todayKey} size={14} />
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () => void }) {
+  const todayKey = dayKey(today());
+  const streak = streakOf(cleared);
+
+  return (
+    <View style={styles.recordRoot}>
+      <ScrollView style={styles.recordScroll} contentContainerStyle={styles.record}>
+        <Text style={styles.recordTitle}>きろく</Text>
+
+        <View style={styles.counts}>
+          <View style={styles.count}>
+            <Text style={styles.countLabel}>連続</Text>
+            <Text style={styles.countValue}>
+              {streak}
+              <Text style={styles.countUnit}> 日</Text>
+            </Text>
+          </View>
+          <View style={styles.count}>
+            <Text style={styles.countLabel}>通算</Text>
+            <Text style={styles.countValue}>
+              {cleared.size}
+              <Text style={styles.countUnit}> 日</Text>
+            </Text>
+          </View>
+        </View>
+
+        {/* 曜日はどの月も同じ幅でそろうので、先頭に1つだけ置く。 */}
+        <View style={[styles.gridRow, styles.weekdayRow]}>
+          {WEEKDAY_LABELS.map((label) => (
+            <Text key={label} style={styles.weekdayLabel}>
+              {label}
+            </Text>
+          ))}
+        </View>
+
+        {/* 今月が上。下へたどると過去へさかのぼる。 */}
+        {monthsToShow(cleared).map(({ year, month }) => (
+          <MonthCalendar
+            key={`${year}-${month}`}
+            year={year}
+            month={month}
+            cleared={cleared}
+            todayKey={todayKey}
+          />
+        ))}
+
+        <Text style={styles.recordNote}>
+          10分を最後までやりきった日に印がつきます。{'\n'}
+          1日に何回やってもその日は1つです。
+        </Text>
+      </ScrollView>
+
+      {/* 記録が何年ぶんにもなるので、とじるだけはスクロールの外に出して常に届かせる。 */}
+      <View style={styles.recordFooter}>
+        <PrimaryButton label="とじる" onPress={onDismiss} />
+      </View>
+    </View>
   );
 }
 
@@ -240,7 +435,11 @@ export default function App() {
   const [praise, setPraise] = useState(PRAISES[0]);
   // null は読み込み中。一瞬ホーム画面が見えてから Tips が出るのを避ける。
   const [showTips, setShowTips] = useState<boolean | null>(null);
+  const [showRecord, setShowRecord] = useState(false);
+  const [cleared, setCleared] = useState<Set<string>>(() => new Set());
   const endAtRef = useRef(0);
+  // 記録は完了時に読み書きするので、state とは別に最新値を同期で持っておく。
+  const clearedRef = useRef<Set<string>>(cleared);
   const chime = useAudioPlayer(require('./assets/chime.wav'));
 
   // サイレントスイッチが入っていても終了音は鳴らす。
@@ -254,6 +453,29 @@ export default function App() {
       .then((seen) => setShowTips(seen === null))
       .catch(() => setShowTips(false));
   }, []);
+
+  // 記録が読めなくても10分は測れる。空のまま進めて起動は止めない。
+  // 読み込み中に完了した日があっても消さないよう、上書きではなく足し合わせる。
+  useEffect(() => {
+    AsyncStorage.getItem(CLEARED_DAYS_KEY)
+      .then((raw) => {
+        const merged = new Set([...parseClearedDays(raw), ...clearedRef.current]);
+        clearedRef.current = merged;
+        setCleared(merged);
+      })
+      .catch(() => {});
+  }, []);
+
+  const recordToday = () => {
+    const key = dayKey(today());
+    if (clearedRef.current.has(key)) return;
+    const next = new Set(clearedRef.current).add(key);
+    clearedRef.current = next;
+    setCleared(next);
+    AsyncStorage.setItem(CLEARED_DAYS_KEY, JSON.stringify([...next].sort())).catch(() => {
+      // 保存できなくても今回の10分は成立している。記録だけ諦める。
+    });
+  };
 
   const dismissTips = () => {
     setShowTips(false);
@@ -285,6 +507,7 @@ export default function App() {
       setRemainMs(0);
       setPraise(PRAISES[Math.floor(Math.random() * PRAISES.length)]);
       setStatus('done');
+      recordToday();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playChime();
     };
@@ -318,21 +541,83 @@ export default function App() {
   const isLandscape = width > height;
   const gap = isLandscape ? 0.5 : 1;
   const clockSize = Math.min(width * 0.34, height * 0.42);
-  const startSize = Math.min(220, height * 0.46);
+  // safe-area のライブラリは入れずに済ませる。この余白を使う帯は
+  // 縦向きでしか出さないので、縦向きのぶんだけ考えればいい。
+  const topInset = Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 0 : 56;
+  const streak = streakOf(cleared);
+  // 丸ボタンは画面の高さではなく「帯を引いた残り」から決める。全体の高さで
+  // 決めると、背の低い端末で下の「つかいかた／きろく」が画面外に出る。
+  // 帯の実測ではなく目安でよく、縮めるべきかどうかが分かれば足りる。
+  const stripHeight = isLandscape ? 0 : topInset + 160;
+  const startSize = Math.min(220, (height - stripHeight) * 0.46);
 
   if (showTips !== false) {
     return (
       <View style={styles.root}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         {showTips === true && <Tips onDismiss={dismissTips} />}
+      </View>
+    );
+  }
+
+  if (showRecord) {
+    return (
+      <View style={styles.root}>
+        <StatusBar style="dark" />
+        <Record cleared={cleared} onDismiss={() => setShowRecord(false)} />
       </View>
     );
   }
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" hidden={status === 'running'} />
+      <StatusBar style="dark" hidden={status === 'running'} />
       {status === 'running' && <KeepScreenAwake />}
+
+      {/* 連続日数と直近1週間。開かなくても見える位置に置く。
+          場所を取る帯なので絶対配置にはしない。重ねると小さい端末で
+          「10 MIN」の上に乗ってしまう。ここで高さを取り、残りを中央が使う。
+          横向きは縦の余白がないので、この帯ごと出さない。 */}
+      {status === 'idle' && !isLandscape && (
+        <Pressable
+          onPress={() => setShowRecord(true)}
+          hitSlop={16}
+          accessibilityRole="button"
+          accessibilityLabel={streak > 0 ? `きろくを見る。連続${streak}日` : 'きろくを見る'}
+          style={({ pressed }) => [
+            styles.weekStrip,
+            { paddingTop: topInset + 12 },
+            pressed && styles.quietPressed,
+          ]}>
+          {/* きろく画面と同じ組みにして、同じ数字がどこでも同じ顔で出るようにする。
+              0日のときは出さない。まだ何もしていない人に0を突きつけても仕方ない。 */}
+          {streak > 0 && (
+            <View style={styles.count}>
+              <Text style={styles.countLabel}>連続</Text>
+              <Text style={styles.countValue}>
+                {streak}
+                <Text style={styles.countUnit}> 日</Text>
+              </Text>
+            </View>
+          )}
+
+          {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
+              曜日を添えると一目で「日付の並び」になる。 */}
+          <View style={styles.weekDays}>
+            {lastDays(WEEK_DAYS).map((date, i) => {
+              const isToday = i === WEEK_DAYS - 1;
+              return (
+                <View key={dayKey(date)} style={styles.weekDay}>
+                  <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
+                    {weekdayLabelOf(date)}
+                  </Text>
+                  <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
+                </View>
+              );
+            })}
+          </View>
+        </Pressable>
+      )}
 
       {status === 'idle' && (
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
@@ -341,11 +626,11 @@ export default function App() {
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
             動画も音楽もなし。{'\n'}10分だけ、手を動かす。
           </Text>
-          <QuietButton
-            label="つかいかた"
-            onPress={() => setShowTips(true)}
-            style={{ marginTop: 24 * gap }}
-          />
+          {/* 横向きではドット列を出せないので、きろくへの入口はここにも置く。 */}
+          <View style={[styles.quietRow, { marginTop: 24 * gap }]}>
+            <QuietButton label="つかいかた" onPress={() => setShowTips(true)} />
+            <QuietButton label="きろく" onPress={() => setShowRecord(true)} />
+          </View>
         </View>
       )}
 
@@ -373,22 +658,35 @@ export default function App() {
           />
         </View>
       )}
+
     </View>
   );
 }
 
-const TEXT = '#F2F2F0';
-const MUTED = 'rgba(242, 242, 240, 0.42)';
-// 画面全体が無彩色なので、色がついているのは「押すところ」だけ。迷いようがない。
-// 彩度は抑えめ。鮮やかにすると集中前の画面から浮いてしまう。
-const ACCENT = '#8FB8FF';
-const ACCENT_EDGE = '#B4D0FF';
-const ON_ACCENT = '#0A1730';
+// ほんのり青みのある明るい灰。純白より目が疲れず、白いカードや
+// ボタンの影が沈んで見える。
+const BG = '#F3F6FC';
+// 黒ではなく濃紺。背景の青みと同じ側に寄せると画面がひとつにまとまる。
+const INK = '#16234A';
+const TEXT = INK;
+const MUTED = 'rgba(22, 35, 74, 0.65)';
+// 画面のほとんどが背景と同じ青みの濃淡なので、はっきり色がついているのは
+// 「押すところ」だけ。迷いようがない。
+// 明るい背景では淡い青は沈むので、暗い背景のときより濃いほうへ振る。
+const ACCENT = '#2F6FE4';
+const ACCENT_EDGE = '#5B8DEF';
+const ON_ACCENT = '#FFFFFF';
+// 記録のドットはあえて色を持たせない。ここに青を足すと、押してほしい
+// 丸ボタンと目線を取り合ってしまう。記録は眺めるもので、押すものではない。
+const DOT_ON = 'rgba(22, 35, 74, 0.72)';
+const DOT_OFF = 'rgba(22, 35, 74, 0.1)';
+const DOT_TODAY = 'rgba(22, 35, 74, 0.28)';
+const WEEKDAY = 'rgba(22, 35, 74, 0.5)';
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#0D0D0F',
+    backgroundColor: BG,
   },
   center: {
     flex: 1,
@@ -429,9 +727,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 14,
   },
+  // 濃い青の上では白の層がそのまま縞に見えるので、暗い背景のときより薄くする。
   startSheen: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.13)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   startLabel: {
     color: ON_ACCENT,
@@ -440,7 +739,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   startSub: {
-    color: 'rgba(10, 23, 48, 0.5)',
+    color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 3,
@@ -461,14 +760,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
   },
-  // 丸ボタンと同じく、上半分だけ明るくして厚みを出す。
+  // 上ほど明るくして厚みを出す。高さは重ねる側で決める。
   primarySheen: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: '48%',
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   primaryLabel: {
     color: ON_ACCENT,
@@ -493,7 +791,7 @@ const styles = StyleSheet.create({
     letterSpacing: -2,
   },
   hint: {
-    color: 'rgba(242, 242, 240, 0.22)',
+    color: 'rgba(22, 35, 74, 0.4)',
     fontSize: 12,
   },
   praise: {
@@ -511,18 +809,154 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 15,
   },
-  tipsScroll: {
+  weekStrip: {
+    alignItems: 'center',
+    gap: 16,
+    paddingBottom: 12,
+  },
+  weekDays: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  quietRow: {
+    flexDirection: 'row',
+    gap: 32,
+  },
+  weekDay: {
+    alignItems: 'center',
+    gap: 5,
+  },
+  weekDayLabel: {
+    color: WEEKDAY,
+    fontSize: 9,
+  },
+  // 右端が今日。曜日だけ明るくして、どちら向きに時間が流れているかを示す。
+  weekDayLabelToday: {
+    color: MUTED,
+  },
+  dotDone: {
+    backgroundColor: DOT_ON,
+  },
+  dotEmpty: {
+    backgroundColor: DOT_OFF,
+  },
+  dotToday: {
+    borderWidth: 1,
+    borderColor: DOT_TODAY,
+  },
+  recordRoot: {
+    flex: 1,
+  },
+  recordScroll: {
+    flex: 1,
+  },
+  record: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignSelf: 'center',
+    alignItems: 'center',
+    maxWidth: 560,
+    paddingHorizontal: 32,
+    paddingTop: 64,
+    paddingBottom: 32,
+  },
+  // スクロールしてきたドットが透けないよう、背景を敷いて隠す。
+  recordFooter: {
+    alignItems: 'center',
+    backgroundColor: BG,
+    paddingTop: 20,
+    paddingBottom: 32,
+  },
+  recordTitle: {
+    color: TEXT,
+    fontSize: 30,
+    fontWeight: '300',
+    marginBottom: 36,
+  },
+  counts: {
+    flexDirection: 'row',
+    gap: 56,
+    marginBottom: 44,
+  },
+  count: {
+    alignItems: 'center',
+  },
+  countValue: {
+    color: TEXT,
+    fontSize: 44,
+    fontWeight: '200',
+    fontVariant: ['tabular-nums'],
+  },
+  countLabel: {
+    color: MUTED,
+    fontSize: 13,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  countUnit: {
+    fontSize: 16,
+    color: MUTED,
+  },
+  month: {
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 40,
+  },
+  // 月見出しはグリッドと同じ幅に広げて、日数を右端にそろえる。
+  monthHeader: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 4,
+  },
+  monthLabel: {
+    color: TEXT,
+    fontSize: 17,
+    fontWeight: '300',
+  },
+  monthCount: {
+    color: MUTED,
+    fontSize: 13,
+  },
+  gridRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  gridCell: {
+    width: 14,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekdayRow: {
+    marginBottom: 16,
+  },
+  weekdayLabel: {
+    width: 14,
+    color: WEEKDAY,
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  recordNote: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  tipsRoot: {
     flex: 1,
   },
   // 横向きやiPadで1行が長くなりすぎないよう幅を頭打ちにして中央に置く。
   // ついでに横向きのノッチも避けられる。
-  tips: {
+  tipsPage: {
     flexGrow: 1,
     justifyContent: 'center',
     alignSelf: 'center',
     maxWidth: 560,
     paddingHorizontal: 32,
-    paddingVertical: 64,
+    paddingVertical: 48,
   },
   tipsTitle: {
     color: TEXT,
@@ -531,17 +965,10 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   tipsBody: {
-    color: 'rgba(242, 242, 240, 0.78)',
+    color: 'rgba(22, 35, 74, 0.78)',
     fontSize: 16,
     lineHeight: 28,
     marginBottom: 20,
-  },
-  tipsHeading: {
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 2,
-    marginTop: 12,
-    marginBottom: 14,
   },
   tipsRule: {
     color: TEXT,
@@ -549,8 +976,23 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     marginBottom: 10,
   },
-  tipsButton: {
-    alignSelf: 'center',
-    marginTop: 44,
+  // ページを送っても動かない位置に置く。何枚あって今どこかが常に見える。
+  tipsFooter: {
+    alignItems: 'center',
+    paddingBottom: 40,
+    gap: 24,
+  },
+  tipsDots: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  tipsDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: DOT_OFF,
+  },
+  tipsDotOn: {
+    backgroundColor: DOT_ON,
   },
 });
