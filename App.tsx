@@ -17,6 +17,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Path } from 'react-native-svg';
 
 import {
   WEEKDAY_LABELS,
@@ -70,6 +71,19 @@ function Dot({ done, isToday, size }: { done: boolean; isToday: boolean; size: n
         isToday && !done && styles.dotToday,
       ]}
     />
+  );
+}
+
+// 連続日数の炎。まだ0日のときは灰にして、火が点いていないことを色で示す。
+// Bootstrap Icons の fire の外郭だけを使う。1個のためにアイコンフォントは積まない。
+function Flame({ size, lit }: { size: number; lit: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16">
+      <Path
+        fill={lit ? ACCENT : DOT_OFF}
+        d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16Z"
+      />
+    </Svg>
   );
 }
 
@@ -591,7 +605,7 @@ export default function App() {
   // 丸ボタンは画面の高さではなく「帯を引いた残り」から決める。全体の高さで
   // 決めると、背の低い端末で下の「つかいかた／きろく」が画面外に出る。
   // 帯の実測ではなく目安でよく、縮めるべきかどうかが分かれば足りる。
-  const stripHeight = isLandscape ? 0 : topInset + 160;
+  const stripHeight = isLandscape ? 0 : topInset + 110;
   const startSize = Math.min(220, (height - stripHeight) * 0.46);
 
   if (showTips !== false) {
@@ -622,44 +636,40 @@ export default function App() {
           「10 MIN」の上に乗ってしまう。ここで高さを取り、残りを中央が使う。
           横向きは縦の余白がないので、この帯ごと出さない。 */}
       {status === 'idle' && !isLandscape && (
-        <Pressable
-          onPress={() => setShowRecord(true)}
-          hitSlop={16}
-          accessibilityRole="button"
-          accessibilityLabel={streak > 0 ? `きろくを見る。連続${streak}日` : 'きろくを見る'}
-          style={({ pressed }) => [
-            styles.weekStrip,
-            { paddingTop: topInset + 12 },
-            pressed && styles.quietPressed,
-          ]}>
-          {/* きろく画面と同じ組みにして、同じ数字がどこでも同じ顔で出るようにする。
-              0日のときは出さない。まだ何もしていない人に0を突きつけても仕方ない。 */}
-          {streak > 0 && (
-            <View style={styles.count}>
-              <Text style={styles.countLabel}>連続</Text>
-              <Text style={styles.countValue}>
+        <View style={[styles.streakArea, { paddingTop: topInset + 12 }]}>
+          <Pressable
+            onPress={() => setShowRecord(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`きろくを見る。連続${streak}日`}
+            style={({ pressed }) => [styles.streakCard, pressed && styles.quietPressed]}>
+            <Flame size={26} lit={streak > 0} />
+
+            {/* 0日でも出す。出たり消えたりすると、この場所に何があるのか覚えられない。 */}
+            <View style={styles.streakCount}>
+              <Text style={styles.streakLabel}>連続</Text>
+              <Text style={styles.streakValue}>
                 {streak}
-                <Text style={styles.countUnit}> 日</Text>
+                <Text style={styles.streakUnit}>日</Text>
               </Text>
             </View>
-          )}
 
-          {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
-              曜日を添えると一目で「日付の並び」になる。 */}
-          <View style={styles.weekDays}>
-            {lastDays(WEEK_DAYS).map((date, i) => {
-              const isToday = i === WEEK_DAYS - 1;
-              return (
-                <View key={dayKey(date)} style={styles.weekDay}>
-                  <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
-                    {weekdayLabelOf(date)}
-                  </Text>
-                  <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={8} />
-                </View>
-              );
-            })}
-          </View>
-        </Pressable>
+            {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
+                曜日を添えると一目で「日付の並び」になる。 */}
+            <View style={styles.weekDays}>
+              {lastDays(WEEK_DAYS).map((date, i) => {
+                const isToday = i === WEEK_DAYS - 1;
+                return (
+                  <View key={dayKey(date)} style={styles.weekDay}>
+                    <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
+                      {weekdayLabelOf(date)}
+                    </Text>
+                    <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={10} />
+                  </View>
+                );
+              })}
+            </View>
+          </Pressable>
+        </View>
       )}
 
       {status === 'idle' && (
@@ -719,6 +729,7 @@ const MUTED = 'rgba(22, 35, 74, 0.65)';
 const ACCENT = '#2F6FE4';
 const ACCENT_EDGE = '#5B8DEF';
 const ON_ACCENT = '#FFFFFF';
+const CARD = '#FFFFFF';
 // 記録のドットはあえて色を持たせない。ここに青を足すと、押してほしい
 // 丸ボタンと目線を取り合ってしまう。記録は眺めるもので、押すものではない。
 const DOT_ON = 'rgba(22, 35, 74, 0.72)';
@@ -852,14 +863,49 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 15,
   },
-  weekStrip: {
-    alignItems: 'center',
-    gap: 16,
+  streakArea: {
+    paddingHorizontal: 24,
     paddingBottom: 12,
+  },
+  // 白いカードで浮かせる。地の色に溶けていると、押せる場所だと気づけない。
+  streakCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 14,
+    maxWidth: 360,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: CARD,
+    borderRadius: 22,
+    shadowColor: INK,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+  streakCount: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  streakLabel: {
+    color: MUTED,
+    fontSize: 12,
+  },
+  streakValue: {
+    color: TEXT,
+    fontSize: 26,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  streakUnit: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '400',
   },
   weekDays: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   quietRow: {
     flexDirection: 'row',
@@ -871,7 +917,7 @@ const styles = StyleSheet.create({
   },
   weekDayLabel: {
     color: WEEKDAY,
-    fontSize: 9,
+    fontSize: 11,
   },
   // 右端が今日。曜日だけ明るくして、どちら向きに時間が流れているかを示す。
   weekDayLabelToday: {
@@ -940,25 +986,6 @@ const styles = StyleSheet.create({
   statUnit: {
     color: MUTED,
     fontSize: 15,
-  },
-  count: {
-    alignItems: 'center',
-  },
-  countValue: {
-    color: TEXT,
-    fontSize: 44,
-    fontWeight: '200',
-    fontVariant: ['tabular-nums'],
-  },
-  countLabel: {
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  countUnit: {
-    fontSize: 16,
-    color: MUTED,
   },
   month: {
     alignItems: 'flex-start',
