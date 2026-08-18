@@ -19,6 +19,7 @@ import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  MONTHS_PER_PAGE,
   WEEKDAY_LABELS,
   WEEK_DAYS,
   countInMonth,
@@ -371,6 +372,10 @@ function MonthCalendar({
 function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () => void }) {
   const todayKey = dayKey(today());
   const streak = streakOf(cleared);
+  // 記録より前の月は既定では出さない。使う前の空のカレンダーを何枚も見せても
+  // 意味がないので、遡りたい人が押したぶんだけ足す。
+  const [extraMonths, setExtraMonths] = useState(0);
+  const months = monthsToShow(cleared, extraMonths);
 
   return (
     <View style={styles.recordRoot}>
@@ -404,7 +409,7 @@ function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () =>
         </View>
 
         {/* 今月が上。下へたどると過去へさかのぼる。 */}
-        {monthsToShow(cleared).map(({ year, month }) => (
+        {months.map(({ year, month }) => (
           <MonthCalendar
             key={`${year}-${month}`}
             year={year}
@@ -413,6 +418,12 @@ function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () =>
             todayKey={todayKey}
           />
         ))}
+
+        <QuietButton
+          label="もっと前を見る"
+          onPress={() => setExtraMonths(extraMonths + MONTHS_PER_PAGE)}
+          style={styles.moreMonths}
+        />
 
         <Text style={styles.recordNote}>
           10分を最後までやりきった日に印がつきます。{'\n'}
@@ -937,6 +948,10 @@ const styles = StyleSheet.create({
     color: WEEKDAY,
     fontSize: 10,
     textAlign: 'center',
+  },
+  moreMonths: {
+    marginTop: 4,
+    marginBottom: 32,
   },
   recordNote: {
     color: MUTED,

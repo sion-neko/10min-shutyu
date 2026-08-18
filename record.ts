@@ -54,7 +54,11 @@ export type Month = { year: number; month: number };
 
 // 記録のある一番古い月から今月まで、新しい順に。
 // 記録がなければ今月だけを返して、空のカレンダーが1枚出るようにする。
-export function monthsToShow(cleared: Set<string>): Month[] {
+// 「もっと前」1回でさかのぼる月数。
+export const MONTHS_PER_PAGE = 12;
+
+// extraMonths を渡すと、記録より前の月もそのぶんだけ足して遡れるようにする。
+export function monthsToShow(cleared: Set<string>, extraMonths = 0): Month[] {
   const base = today();
   let oldest = new Date(base.getFullYear(), base.getMonth(), 1);
   for (const key of cleared) {
@@ -63,6 +67,7 @@ export function monthsToShow(cleared: Set<string>): Month[] {
     const first = new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
     if (first < oldest) oldest = first;
   }
+  oldest.setMonth(oldest.getMonth() - extraMonths);
 
   const months: Month[] = [];
   const cursor = new Date(base.getFullYear(), base.getMonth(), 1);
