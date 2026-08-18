@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   WEEKDAY_LABELS,
   WEEK_DAYS,
+  bestStreakOf,
   countInMonth,
   currentMonth,
   dayKey,
@@ -99,6 +100,11 @@ function usePressScale(to: number) {
 }
 
 const RIPPLE_MS = 2600;
+
+// カレンダーのマス。格子・曜日見出し・ドットの3か所でそろえる必要があるため定数で持つ。
+// 7マス + 6すきま = 7*20 + 6*15 = 230pt。iPhone SE の内寸 311pt に収まる。
+const CELL_SIZE = 20;
+const CELL_GAP = 15;
 
 // 何も起きていない画面で唯一動いているものが、押してほしいボタン。
 function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
@@ -382,7 +388,7 @@ function MonthCalendar({
             }
             return (
               <View key={col} style={styles.gridCell}>
-                <Dot done={cleared.has(key)} isToday={key === todayKey} size={14} />
+                <Dot done={cleared.has(key)} isToday={key === todayKey} size={CELL_SIZE} />
               </View>
             );
           })}
@@ -395,38 +401,37 @@ function MonthCalendar({
 function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () => void }) {
   const todayKey = dayKey(today());
   const streak = streakOf(cleared);
+  const best = bestStreakOf(cleared);
   // 表示中の月。過去は好きなだけさかのぼれる。今月より先には記録が存在しない。
   const [month, setMonth] = useState<Month>(currentMonth);
+  const monthCount = countInMonth(cleared, month.year, month.month);
 
   return (
     <View style={styles.recordRoot}>
       <ScrollView style={styles.recordScroll} contentContainerStyle={styles.record}>
         <Text style={styles.recordTitle}>きろく</Text>
 
-        <View style={styles.counts}>
-          <View style={styles.count}>
-            <Text style={styles.countLabel}>連続</Text>
-            <Text style={styles.countValue}>
-              {streak}
-              <Text style={styles.countUnit}> 日</Text>
-            </Text>
-          </View>
-          <View style={styles.count}>
-            <Text style={styles.countLabel}>通算</Text>
-            <Text style={styles.countValue}>
-              {cleared.size}
-              <Text style={styles.countUnit}> 日</Text>
-            </Text>
-          </View>
+        <View style={styles.stats}>
+          {[
+            { label: '連続日数', value: streak },
+            { label: '最高日数', value: best },
+            { label: '通算日数', value: cleared.size },
+          ].map(({ label, value }) => (
+            <View key={label} style={styles.statRow}>
+              <Text style={styles.statLabel}>{label}</Text>
+              <Text style={styles.statValue}>
+                {value}
+                <Text style={styles.statUnit}> 日</Text>
+              </Text>
+            </View>
+          ))}
         </View>
 
         <View style={styles.monthNav}>
           <ArrowButton label="←" hint="前の月" onPress={() => setMonth(shiftMonth(month, -1))} />
           <View style={styles.monthTitle}>
             <Text style={styles.monthLabel}>{monthLabel(month.year, month.month)}</Text>
-            <Text style={styles.monthCount}>
-              {countInMonth(cleared, month.year, month.month)}日
-            </Text>
+            <Text style={styles.monthCount}>{monthCount > 0 ? `${monthCount}日` : ' '}</Text>
           </View>
           <ArrowButton
             label="→"
@@ -911,10 +916,30 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     marginBottom: 36,
   },
-  counts: {
-    flexDirection: 'row',
-    gap: 56,
+  // ラベルを左、数を右。等幅数字なので桁がそろう。
+  stats: {
+    width: 208,
+    gap: 14,
     marginBottom: 44,
+  },
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+  },
+  statLabel: {
+    color: MUTED,
+    fontSize: 15,
+  },
+  statValue: {
+    color: TEXT,
+    fontSize: 32,
+    fontWeight: '200',
+    fontVariant: ['tabular-nums'],
+  },
+  statUnit: {
+    color: MUTED,
+    fontSize: 15,
   },
   count: {
     alignItems: 'center',
@@ -937,7 +962,7 @@ const styles = StyleSheet.create({
   },
   month: {
     alignItems: 'flex-start',
-    gap: 12,
+    gap: CELL_GAP,
     marginBottom: 32,
   },
   monthNav: {
@@ -972,11 +997,11 @@ const styles = StyleSheet.create({
   },
   gridRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: CELL_GAP,
   },
   gridCell: {
-    width: 14,
-    height: 14,
+    width: CELL_SIZE,
+    height: CELL_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -984,9 +1009,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   weekdayLabel: {
-    width: 14,
+    width: CELL_SIZE,
     color: WEEKDAY,
-    fontSize: 10,
+    fontSize: 11,
     textAlign: 'center',
   },
   recordNote: {

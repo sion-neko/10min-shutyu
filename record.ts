@@ -39,6 +39,26 @@ export function streakOf(cleared: Set<string>) {
   return count;
 }
 
+function dateOfKey(key: string) {
+  const [year, month, date] = key.split('-').map(Number);
+  return new Date(year, month - 1, date);
+}
+
+// これまでで一番長く続いた日数。日付順に並べて、前日と地続きの間だけ数え続ける。
+// 今の連続とは違って今日を特別扱いしない。過去の記録は動かないため。
+export function bestStreakOf(cleared: Set<string>) {
+  const days = [...cleared].filter(isDayKey).sort();
+  let best = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const key of days) {
+    run = prev !== null && dayKey(addDays(dateOfKey(prev), 1)) === key ? run + 1 : 1;
+    if (run > best) best = run;
+    prev = key;
+  }
+  return best;
+}
+
 // getDay() は日曜が0。月曜はじまりの WEEKDAY_LABELS に合わせてずらす。
 export function weekdayLabelOf(d: Date) {
   return WEEKDAY_LABELS[(d.getDay() + 6) % 7];
