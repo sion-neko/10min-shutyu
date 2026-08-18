@@ -19,20 +19,22 @@ import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  MONTHS_PER_PAGE,
   WEEKDAY_LABELS,
   WEEK_DAYS,
   countInMonth,
+  currentMonth,
   dayKey,
+  isCurrentMonth,
   lastDays,
   monthLabel,
   monthWeeks,
-  monthsToShow,
   parseClearedDays,
+  shiftMonth,
   streakOf,
   today,
   weekdayLabelOf,
 } from './record';
+import type { Month } from './record';
 
 const DURATION_MS = 10 * 60 * 1000;
 const TIPS_SEEN_KEY = 'tipsSeen';
@@ -331,6 +333,32 @@ function Tips({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
+// カレンダーの月送り。押せないほうも消さずに薄くして、矢印の位置が動かないようにする。
+function ArrowButton({
+  label,
+  hint,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  hint: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={20}
+      accessibilityRole="button"
+      accessibilityLabel={hint}
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      style={({ pressed }) => pressed && styles.quietPressed}>
+      <Text style={[styles.monthArrow, disabled && styles.monthArrowOff]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function MonthCalendar({
   year,
   month,
@@ -344,11 +372,6 @@ function MonthCalendar({
 }) {
   return (
     <View style={styles.month}>
-      <View style={styles.monthHeader}>
-        <Text style={styles.monthLabel}>{monthLabel(year, month)}</Text>
-        <Text style={styles.monthCount}>{countInMonth(cleared, year, month)}日</Text>
-      </View>
-
       {monthWeeks(year, month, todayKey).map((week, row) => (
         <View key={row} style={styles.gridRow}>
           {week.map((date, col) => {
@@ -372,10 +395,8 @@ function MonthCalendar({
 function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () => void }) {
   const todayKey = dayKey(today());
   const streak = streakOf(cleared);
-  // 記録より前の月は既定では出さない。使う前の空のカレンダーを何枚も見せても
-  // 意味がないので、遡りたい人が押したぶんだけ足す。
-  const [extraMonths, setExtraMonths] = useState(0);
-  const months = monthsToShow(cleared, extraMonths);
+  // 表示中の月。過去は好きなだけさかのぼれる。今月より先には記録が存在しない。
+  const [month, setMonth] = useState<Month>(currentMonth);
 
   return (
     <View style={styles.recordRoot}>
@@ -399,7 +420,23 @@ function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () =>
           </View>
         </View>
 
-        {/* 曜日はどの月も同じ幅でそろうので、先頭に1つだけ置く。 */}
+        <View style={styles.monthNav}>
+          <ArrowButton label="←" hint="前の月" onPress={() => setMonth(shiftMonth(month, -1))} />
+          <View style={styles.monthTitle}>
+            <Text style={styles.monthLabel}>{monthLabel(month.year, month.month)}</Text>
+            <Text style={styles.monthCount}>
+              {countInMonth(cleared, month.year, month.month)}日
+            </Text>
+          </View>
+          <ArrowButton
+            label="→"
+            hint="次の月"
+            onPress={() => setMonth(shiftMonth(month, 1))}
+            disabled={isCurrentMonth(month)}
+          />
+        </View>
+
+        {/* 曜日はどの月も同じ幅でそろうので、格子の上に1つだけ置く。 */}
         <View style={[styles.gridRow, styles.weekdayRow]}>
           {WEEKDAY_LABELS.map((label) => (
             <Text key={label} style={styles.weekdayLabel}>
@@ -408,21 +445,11 @@ function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () =>
           ))}
         </View>
 
-        {/* 今月が上。下へたどると過去へさかのぼる。 */}
-        {months.map(({ year, month }) => (
-          <MonthCalendar
-            key={`${year}-${month}`}
-            year={year}
-            month={month}
-            cleared={cleared}
-            todayKey={todayKey}
-          />
-        ))}
-
-        <QuietButton
-          label="もっと前を見る"
-          onPress={() => setExtraMonths(extraMonths + MONTHS_PER_PAGE)}
-          style={styles.moreMonths}
+        <MonthCalendar
+          year={month.year}
+          month={month.month}
+          cleared={cleared}
+          todayKey={todayKey}
         />
 
         <Text style={styles.recordNote}>
@@ -911,15 +938,28 @@ const styles = StyleSheet.create({
   month: {
     alignItems: 'flex-start',
     gap: 12,
-    marginBottom: 40,
+    marginBottom: 32,
   },
-  // 月見出しはグリッドと同じ幅に広げて、日数を右端にそろえる。
-  monthHeader: {
-    alignSelf: 'stretch',
+  monthNav: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 28,
+    marginBottom: 20,
+  },
+  // 「8月」と「2025年12月」で矢印が動かないよう、最小幅を決めておく。
+  monthTitle: {
+    alignItems: 'center',
+    minWidth: 116,
+    gap: 2,
+  },
+  monthArrow: {
+    color: TEXT,
+    fontSize: 20,
+    paddingHorizontal: 6,
+  },
+  monthArrowOff: {
+    color: DOT_OFF,
   },
   monthLabel: {
     color: TEXT,
@@ -948,10 +988,6 @@ const styles = StyleSheet.create({
     color: WEEKDAY,
     fontSize: 10,
     textAlign: 'center',
-  },
-  moreMonths: {
-    marginTop: 4,
-    marginBottom: 32,
   },
   recordNote: {
     color: MUTED,

@@ -52,30 +52,20 @@ export function lastDays(count: number) {
 
 export type Month = { year: number; month: number };
 
-// 記録のある一番古い月から今月まで、新しい順に。
-// 記録がなければ今月だけを返して、空のカレンダーが1枚出るようにする。
-// 「もっと前」1回でさかのぼる月数。
-export const MONTHS_PER_PAGE = 12;
-
-// extraMonths を渡すと、記録より前の月もそのぶんだけ足して遡れるようにする。
-export function monthsToShow(cleared: Set<string>, extraMonths = 0): Month[] {
+export function currentMonth(): Month {
   const base = today();
-  let oldest = new Date(base.getFullYear(), base.getMonth(), 1);
-  for (const key of cleared) {
-    // 読み込み時に弾いているはずだが、ここが崩れると月が何百枚も出るので念のため。
-    if (!isDayKey(key)) continue;
-    const first = new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
-    if (first < oldest) oldest = first;
-  }
-  oldest.setMonth(oldest.getMonth() - extraMonths);
+  return { year: base.getFullYear(), month: base.getMonth() };
+}
 
-  const months: Month[] = [];
-  const cursor = new Date(base.getFullYear(), base.getMonth(), 1);
-  while (cursor >= oldest) {
-    months.push({ year: cursor.getFullYear(), month: cursor.getMonth() });
-    cursor.setMonth(cursor.getMonth() - 1);
-  }
-  return months;
+// 年またぎは Date に任せる。12月の次が翌年1月になる計算を自前で書かない。
+export function shiftMonth({ year, month }: Month, by: number): Month {
+  const d = new Date(year, month + by, 1);
+  return { year: d.getFullYear(), month: d.getMonth() };
+}
+
+export function isCurrentMonth({ year, month }: Month) {
+  const now = currentMonth();
+  return year === now.year && month === now.month;
 }
 
 // 1か月ぶんを月曜はじまりの週に切る。1日の前と末日の後ろは null で埋めて、
