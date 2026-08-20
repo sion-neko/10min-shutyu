@@ -53,7 +53,37 @@ const PRAISES = [
   '手が止まらないなら、\n止めなくていい。',
   '今日の自分、悪くない。',
   '10分前の自分に\n感謝しよう。',
+  '手を動かした。\nそれがすべて。',
+  'ちゃんと、進んだ。',
+  '何もしなかった10分とは、\n確かに違う。',
+  '上出来。',
+  '続きは、また10分。',
+  '止まらずに来たね。',
+  'はじめられる人だ。',
+  '今日はもう、勝っている。',
+  '小さく進むのが、\n結局いちばん速い。',
+  'やる気は、\nあとからついてきた。',
+  'ひとつ、積み上がった。',
+  'まだ、いける気がする？',
+  '逃げなかった。',
+  '10分ぶん、前へ。',
+  'きちんと座っていた。\nそれで十分。',
+  '完璧じゃなくていい。\n続けばいい。',
+  '手が覚えはじめている。',
+  '気分より、行動が勝った。',
+  'これを毎日やったら、\nどうなると思う？',
+  'ひと区切り。\n伸びをしよう。',
+  '誰も見ていなくても、\nやった。',
+  '明日の自分が、\n少し楽になった。',
+  'また戻ってくればいい。',
 ];
+
+// 続けて10分をやったときに同じ言葉が並ぶとランダムに見えないので、
+// 直前に出したものだけは候補から外す。
+function pickPraise(prev?: string) {
+  const candidates = PRAISES.filter((p) => p !== prev);
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
 
 // running は10分。focus と break はポモドーロの25分と5分。
 type Status = 'idle' | 'running' | 'focus' | 'break' | 'done';
@@ -504,7 +534,7 @@ export default function App() {
   const { width, height } = useWindowDimensions();
   const [status, setStatus] = useState<Status>('idle');
   const [remainMs, setRemainMs] = useState(DURATION_MS);
-  const [praise, setPraise] = useState(PRAISES[0]);
+  const [praise, setPraise] = useState(() => pickPraise());
   // ポモドーロの何セット目か。1から数える。
   const [pomodoroSet, setPomodoroSet] = useState(1);
   // null は読み込み中。一瞬ホーム画面が見えてから Tips が出るのを避ける。
@@ -594,7 +624,7 @@ export default function App() {
       }
       setRemainMs(0);
       if (status === 'running') {
-        setPraise(PRAISES[Math.floor(Math.random() * PRAISES.length)]);
+        setPraise((prev) => pickPraise(prev));
         setStatus('done');
         // 記録は10分をやりきった日に付く。ポモドーロはこの完了画面からしか
         // 始められないので、25分のほうで付け直す必要はない。
