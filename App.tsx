@@ -219,13 +219,16 @@ function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
   );
 }
 
-// 「もう10分」「わかった」など、次に進むための主ボタン。
+// 「ポモドーロで続ける」「わかった」など、次に進むための主ボタン。
+// sub は丸ボタンの「はじめる / 10:00」と同じで、押した先の長さを添えるためのもの。
 function PrimaryButton({
   label,
+  sub,
   onPress,
   style,
 }: {
   label: string;
+  sub?: string;
   onPress: () => void;
   style?: object;
 }) {
@@ -237,6 +240,7 @@ function PrimaryButton({
       onPressIn={onPressIn}
       onPressOut={onPressOut}
       accessibilityRole="button"
+      accessibilityLabel={sub === undefined ? undefined : `${label} ${sub}`}
       style={style}>
       <Animated.View style={[styles.primaryButton, { transform: [{ scale }] }]}>
         {/* 丸ボタンと同じ考え方で、高さちがいの層を重ねて境目をぼかす。
@@ -249,37 +253,7 @@ function PrimaryButton({
           />
         ))}
         <Text style={styles.primaryLabel}>{label}</Text>
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-// 主ボタンの次に強いボタン。塗らずに輪郭だけにして、「もう10分」と
-// 目線を取り合わないようにする。すぐ隣に濃い青が2つ並ぶと、どちらも選べない。
-function SecondaryButton({
-  label,
-  sub,
-  onPress,
-  style,
-}: {
-  label: string;
-  sub: string;
-  onPress: () => void;
-  style?: object;
-}) {
-  const { scale, onPressIn, onPressOut } = usePressScale(0.95);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
-      accessibilityRole="button"
-      accessibilityLabel={`${label} ${sub}`}
-      style={style}>
-      <Animated.View style={[styles.secondaryButton, { transform: [{ scale }] }]}>
-        <Text style={styles.secondaryLabel}>{label}</Text>
-        <Text style={styles.secondarySub}>{sub}</Text>
+        {sub !== undefined && <Text style={styles.primarySub}>{sub}</Text>}
       </Animated.View>
     </Pressable>
   );
@@ -809,13 +783,13 @@ export default function App() {
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
           <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
-          <PrimaryButton label="もう10分" onPress={start} style={{ marginTop: 44 * gap }} />
-          {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。 */}
-          <SecondaryButton
+          {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。
+              もう10分やりたい人もここへ来る。同じことを2つ並べても選べない。 */}
+          <PrimaryButton
             label="ポモドーロで続ける"
             sub="25分やって5分休む"
             onPress={startPomodoro}
-            style={{ marginTop: 16 * gap }}
+            style={{ marginTop: 64 * gap }}
           />
           <QuietButton label="おわる" onPress={stop} style={{ marginTop: 24 * gap }} />
         </View>
@@ -910,6 +884,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   primaryButton: {
+    alignItems: 'center',
     paddingHorizontal: 44,
     paddingVertical: 17,
     borderRadius: 999,
@@ -938,25 +913,8 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: 'center',
   },
-  // 塗らずに輪郭だけ。白いカードの上に青い縁と青い字で、押せることは伝わる。
-  secondaryButton: {
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 999,
-    backgroundColor: CARD,
-    borderWidth: 1.5,
-    borderColor: ACCENT_EDGE,
-  },
-  secondaryLabel: {
-    color: ACCENT,
-    fontSize: 17,
-    fontWeight: '600',
-    letterSpacing: 1,
-    textAlign: 'center',
-  },
-  secondarySub: {
-    color: MUTED,
+  primarySub: {
+    color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 12,
     marginTop: 3,
     textAlign: 'center',
