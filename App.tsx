@@ -39,6 +39,9 @@ import {
 import type { Month } from './record';
 
 const DURATION_MS = 10 * 60 * 1000;
+// 10分をやりきった人だけが入れる続きの道。ポモドーロ法の 25分集中 → 5分休憩。
+const FOCUS_MS = 25 * 60 * 1000;
+const BREAK_MS = 5 * 60 * 1000;
 const TIPS_SEEN_KEY = 'tipsSeen';
 const CLEARED_DAYS_KEY = 'clearedDays';
 
@@ -47,14 +50,14 @@ const PRAISES = [
   '10分、やりきった。',
   'よく始めた。\nそれが一番むずかしい。',
   'その調子。',
-  '手が止まらないなら、\nもう10分。',
+  '手が止まらないなら、\n止めなくていい。',
   '今日の自分、悪くない。',
   '10分前の自分に\n感謝しよう。',
   '手を動かした。\nそれがすべて。',
   'ちゃんと、進んだ。',
   '何もしなかった10分とは、\n確かに違う。',
   '上出来。',
-  '続きは、また10分。',
+  '続きは、いつでも。',
   '止まらずに来たね。',
   'はじめられる人だ。',
   '今日はもう、勝っている。',
@@ -75,14 +78,21 @@ const PRAISES = [
   'また戻ってくればいい。',
 ];
 
-// 「もう10分」で連続したときに同じ言葉が並ぶとランダムに見えないので、
+// 続けて10分をやったときに同じ言葉が並ぶとランダムに見えないので、
 // 直前に出したものだけは候補から外す。
 function pickPraise(prev?: string) {
   const candidates = PRAISES.filter((p) => p !== prev);
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-type Status = 'idle' | 'running' | 'done';
+// running は10分。focus と break はポモドーロの25分と5分。
+type Status = 'idle' | 'running' | 'focus' | 'break' | 'done';
+
+// 時計が動いている状態。画面を消さない・離れたらリセット・音で終わりを知らせる、
+// の3つはどれも同じ扱いなので、状態ごとに条件を書き分けない。
+function isCounting(status: Status) {
+  return status === 'running' || status === 'focus' || status === 'break';
+}
 
 function formatRemaining(ms: number) {
   const totalSec = Math.max(0, Math.ceil(ms / 1000));
@@ -239,13 +249,16 @@ function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
   );
 }
 
-// 「もう10分」「わかった」など、次に進むための主ボタン。
+// 「ポモドーロで続ける」「わかった」など、次に進むための主ボタン。
+// sub は丸ボタンの「はじめる / 10:00」と同じで、押した先の長さを添えるためのもの。
 function PrimaryButton({
   label,
+  sub,
   onPress,
   style,
 }: {
   label: string;
+  sub?: string;
   onPress: () => void;
   style?: object;
 }) {
@@ -257,6 +270,7 @@ function PrimaryButton({
       onPressIn={onPressIn}
       onPressOut={onPressOut}
       accessibilityRole="button"
+      accessibilityLabel={sub === undefined ? undefined : `${label} ${sub}`}
       style={style}>
       <Animated.View style={[styles.primaryButton, { transform: [{ scale }] }]}>
         {/* 丸ボタンと同じ考え方で、高さちがいの層を重ねて境目をぼかす。
@@ -269,6 +283,7 @@ function PrimaryButton({
           />
         ))}
         <Text style={styles.primaryLabel}>{label}</Text>
+        {sub !== undefined && <Text style={styles.primarySub}>{sub}</Text>}
       </Animated.View>
     </Pressable>
   );
@@ -520,6 +535,8 @@ export default function App() {
   const [status, setStatus] = useState<Status>('idle');
   const [remainMs, setRemainMs] = useState(DURATION_MS);
   const [praise, setPraise] = useState(() => pickPraise());
+  // ポモドーロの何セット目か。1から数える。
+  const [pomodoroSet, setPomodoroSet] = useState(1);
   // null は読み込み中。一瞬ホーム画面が見えてから Tips が出るのを避ける。
   const [showTips, setShowTips] = useState<boolean | null>(null);
   const [showRecord, setShowRecord] = useState(false);
@@ -581,9 +598,23 @@ export default function App() {
     chime.play();
   };
 
+  // 終了時刻だけを置いて状態を切り替える。残り時間はこの時刻から毎回引き直す。
+  const startPhase = (next: 'running' | 'focus' | 'break') => {
+    const ms = next === 'running' ? DURATION_MS : next === 'focus' ? FOCUS_MS : BREAK_MS;
+    endAtRef.current = Date.now() + ms;
+    setRemainMs(ms);
+    setStatus(next);
+  };
+
+  const stop = () => {
+    setRemainMs(DURATION_MS);
+    setPomodoroSet(1);
+    setStatus('idle');
+  };
+
   // 残り時間は「終了時刻との差」で毎回求める。setInterval のズレが蓄積しない。
   useEffect(() => {
-    if (status !== 'running') return;
+    if (!isCounting(status)) return;
 
     const tick = () => {
       const left = endAtRef.current - Date.now();
@@ -592,9 +623,20 @@ export default function App() {
         return;
       }
       setRemainMs(0);
-      setPraise((prev) => pickPraise(prev));
-      setStatus('done');
-      recordToday();
+      if (status === 'running') {
+        setPraise((prev) => pickPraise(prev));
+        setStatus('done');
+        // 記録は10分をやりきった日に付く。ポモドーロはこの完了画面からしか
+        // 始められないので、25分のほうで付け直す必要はない。
+        recordToday();
+      } else if (status === 'focus') {
+        startPhase('break');
+      } else {
+        // 休憩明けはタップを待たずに次の25分へ入る。離れたらリセットである以上
+        // どのみち画面の前にいるので、ここで待たせても手が止まるだけ。
+        setPomodoroSet((n) => n + 1);
+        startPhase('focus');
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playChime();
     };
@@ -605,13 +647,13 @@ export default function App() {
   }, [status]);
 
   // アプリを離れたらタイマーは破棄。10分は10分、途中離脱は最初からやり直し。
+  // ポモドーロも同じで、休憩中に離れてもそこで終わり。セット数も1に戻る。
   // 'inactive'（通知センターを少し引いた等）は含めない。誤爆が厳しすぎるため。
   useEffect(() => {
-    if (status !== 'running') return;
+    if (!isCounting(status)) return;
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'background') {
-        setRemainMs(DURATION_MS);
-        setStatus('idle');
+        stop();
       }
     });
     return () => sub.remove();
@@ -619,9 +661,13 @@ export default function App() {
 
   const start = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    endAtRef.current = Date.now() + DURATION_MS;
-    setRemainMs(DURATION_MS);
-    setStatus('running');
+    startPhase('running');
+  };
+
+  const startPomodoro = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setPomodoroSet(1);
+    startPhase('focus');
   };
 
   // 横向きは高さが一気に詰まるので、文字も余白も短い辺に合わせて縮める。
@@ -658,8 +704,8 @@ export default function App() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="dark" hidden={status === 'running'} />
-      {status === 'running' && <KeepScreenAwake />}
+      <StatusBar style="dark" hidden={isCounting(status)} />
+      {isCounting(status) && <KeepScreenAwake />}
 
       {/* 連続日数と直近1週間。開かなくても見える位置に置く。
           場所を取る帯なので絶対配置にはしない。重ねると小さい端末で
@@ -729,16 +775,53 @@ export default function App() {
         </View>
       )}
 
+      {/* 25分。10分の画面にセット数だけを足す。集中中に増える情報はこれ以上いらない。 */}
+      {status === 'focus' && (
+        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+          <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>
+            {pomodoroSet} セットめ
+          </Text>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={[styles.clock, { fontSize: clockSize }]}>
+            {formatRemaining(remainMs)}
+          </Text>
+          <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
+        </View>
+      )}
+
+      {/* 5分の休憩。時計を薄くして、同じ数字でも「進む時間」に見えないようにする。
+          途中で止められないルールの唯一の抜け道がここ。「おわる」はこの5分にしかない。 */}
+      {status === 'break' && (
+        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+          <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>きゅうけい</Text>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={[styles.clock, styles.clockBreak, { fontSize: clockSize }]}>
+            {formatRemaining(remainMs)}
+          </Text>
+          <Text style={[styles.hint, { marginTop: 24 * gap }]}>
+            アプリを離れるとリセット{'\n'}0になると {pomodoroSet + 1} セットめが始まります
+          </Text>
+          <QuietButton label="おわる" onPress={stop} style={{ marginTop: 32 * gap }} />
+        </View>
+      )}
+
       {status === 'done' && (
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
           <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
-          <PrimaryButton label="もう10分" onPress={start} style={{ marginTop: 64 * gap }} />
-          <QuietButton
-            label="おわる"
-            onPress={() => setStatus('idle')}
-            style={{ marginTop: 24 * gap }}
+          {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。
+              もう10分やりたい人もここへ来る。同じことを2つ並べても選べない。 */}
+          <PrimaryButton
+            label="ポモドーロで続ける"
+            sub="25分やって5分休む"
+            onPress={startPomodoro}
+            style={{ marginTop: 64 * gap }}
           />
+          <QuietButton label="おわる" onPress={stop} style={{ marginTop: 24 * gap }} />
         </View>
       )}
 
@@ -831,6 +914,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   primaryButton: {
+    alignItems: 'center',
     paddingHorizontal: 44,
     paddingVertical: 17,
     borderRadius: 999,
@@ -859,6 +943,12 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: 'center',
   },
+  primarySub: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    marginTop: 3,
+    textAlign: 'center',
+  },
   quietPressed: {
     opacity: 0.5,
   },
@@ -874,9 +964,15 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     letterSpacing: -2,
   },
+  // 休憩は数字を追う時間ではない。濃さを落として、集中の25分と役割を分ける。
+  clockBreak: {
+    color: MUTED,
+  },
   hint: {
     color: 'rgba(22, 35, 74, 0.4)',
     fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
   },
   praise: {
     color: TEXT,
