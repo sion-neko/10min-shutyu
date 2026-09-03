@@ -42,6 +42,8 @@ const DURATION_MS = 10 * 60 * 1000;
 // 10分をやりきった人だけが入れる続きの道。ポモドーロ法の 25分集中 → 5分休憩。
 const FOCUS_MS = 25 * 60 * 1000;
 const BREAK_MS = 5 * 60 * 1000;
+// 休憩の終わりは残り5秒から「ぽん」で数える。25分がいきなり始まらないように。
+const COUNTDOWN_FROM = 5;
 const TIPS_SEEN_KEY = 'tipsSeen';
 const CLEARED_DAYS_KEY = 'clearedDays';
 
@@ -545,6 +547,9 @@ export default function App() {
   // 記録は完了時に読み書きするので、state とは別に最新値を同期で持っておく。
   const clearedRef = useRef<Set<string>>(cleared);
   const chime = useAudioPlayer(require('./assets/chime.wav'));
+  const pon = useAudioPlayer(require('./assets/pon.wav'));
+  // 同じ秒で何度も鳴らさないための「最後に鳴らした残り秒数」。0 は未再生。
+  const countdownRef = useRef(0);
 
   // サイレントスイッチが入っていても終了音は鳴らす。
   useEffect(() => {
@@ -589,18 +594,19 @@ export default function App() {
   };
 
   // 2回目以降は再生位置が末尾に残っているので、頭出しを待ってから鳴らす。
-  const playChime = async () => {
+  const playSound = async (player: typeof chime) => {
     try {
-      await chime.seekTo(0);
+      await player.seekTo(0);
     } catch {
       // 頭出しに失敗しても鳴らすことを優先する
     }
-    chime.play();
+    player.play();
   };
 
   // 終了時刻だけを置いて状態を切り替える。残り時間はこの時刻から毎回引き直す。
   const startPhase = (next: 'running' | 'focus' | 'break') => {
     const ms = next === 'running' ? DURATION_MS : next === 'focus' ? FOCUS_MS : BREAK_MS;
+    countdownRef.current = 0;
     endAtRef.current = Date.now() + ms;
     setRemainMs(ms);
     setStatus(next);
@@ -620,6 +626,14 @@ export default function App() {
       const left = endAtRef.current - Date.now();
       if (left > 0) {
         setRemainMs(left);
+        // 休憩の残り5秒だけ、1秒ごとに「ぽん」。0秒のチャイムが開始の合図になる。
+        if (status === 'break') {
+          const sec = Math.ceil(left / 1000);
+          if (sec <= COUNTDOWN_FROM && sec !== countdownRef.current) {
+            countdownRef.current = sec;
+            playSound(pon);
+          }
+        }
         return;
       }
       setRemainMs(0);
@@ -638,7 +652,7 @@ export default function App() {
         startPhase('focus');
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      playChime();
+      playSound(chime);
     };
 
     tick();
