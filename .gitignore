@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# 作業用の一時ファイル置き場(コミットしない)
+_scratch/
