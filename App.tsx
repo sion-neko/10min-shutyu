@@ -769,10 +769,21 @@ export default function App() {
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
             動画も音楽もなし。{'\n'}10分だけ、手を動かす。
           </Text>
-          {/* 横向きではドット列を出せないので、きろくへの入口はここにも置く。 */}
+          {/* 縦向きは上の帯がきろくの入口になるので、ここには出さない。
+              横向きは帯ごと出せないので、ここだけが入口になる。 */}
           <View style={[styles.quietRow, { marginTop: 24 * gap }]}>
-            <QuietButton label="つかいかた" onPress={() => setShowTips(true)} />
-            <QuietButton label="きろく" onPress={() => setShowRecord(true)} />
+            <QuietButton
+              label="このアプリについて"
+              onPress={() => setShowTips(true)}
+              style={styles.faint}
+            />
+            {isLandscape && (
+              <QuietButton
+                label="きろく"
+                onPress={() => setShowRecord(true)}
+                style={styles.faint}
+              />
+            )}
           </View>
         </View>
       )}
@@ -850,6 +861,7 @@ const BG = '#F3F6FC';
 const INK = '#16234A';
 const TEXT = INK;
 const MUTED = 'rgba(22, 35, 74, 0.65)';
+const FAINT = 'rgba(22, 35, 74, 0.38)';
 // 画面のほとんどが背景と同じ青みの濃淡なので、はっきり色がついているのは
 // 「押すところ」だけ。迷いようがない。
 // 明るい背景では淡い青は沈むので、暗い背景のときより濃いほうへ振る。
@@ -1002,6 +1014,13 @@ const styles = StyleSheet.create({
   quiet: {
     color: MUTED,
     fontSize: 15,
+  },
+  // すぐ上の「10分だけ、手を動かす。」より一段落とす。読む文と押せる文が
+  // 同じ濃さで並ぶと、どちらも素通りされる。
+  faint: {
+    color: FAINT,
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
   streakArea: {
     paddingHorizontal: 24,
