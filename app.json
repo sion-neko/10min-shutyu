@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "いますぐ10分",
+    "name": "Imasugu10min",
     "slug": "10min",
     "version": "1.0.0",
     "orientation": "default",
@@ -9,7 +9,11 @@
     "backgroundColor": "#F3F6FC",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.sionneko.tenmin"
+      "bundleIdentifier": "com.sionneko.tenmin",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDisplayName": "いますぐ10分"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -20,7 +24,9 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
