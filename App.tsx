@@ -157,16 +157,40 @@ function usePressScale(to: number) {
 
 const RIPPLE_MS = 2600;
 
+// 押してから画面が切り替わるまで。押した実感を見せる間 → 円が広がる、の順。
+// この間にボタンが沈んで弾み、波紋が外へ飛ぶ。短くすると押した手応えが消える。
+// 全体で 1秒強かける。10分を始める場面なので、急かすより落ち着いて渡したい。
+const LAUNCH_HOLD_MS = 280;
+const LAUNCH_MS = 700;
+// 押した合図に、漂っていた波紋を外へ飛ばす時間。
+const RIPPLE_RELEASE_MS = 520;
+// 切り替わった先が浮かび上がる時間。
+const ENTER_MS = 420;
+// 広がる円のもとの直径。ここから画面の対角まで引き伸ばす。
+const LAUNCH_SIZE = 100;
+
 // カレンダーのマス。格子・曜日見出し・ドットの3か所でそろえる必要があるため定数で持つ。
 // 7マス + 6すきま = 7*20 + 6*15 = 230pt。iPhone SE の内寸 311pt に収まる。
 const CELL_SIZE = 20;
 const CELL_GAP = 15;
 
 // 何も起きていない画面で唯一動いているものが、押してほしいボタン。
-function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
+function StartButton({
+  size,
+  onPress,
+  onCenter,
+}: {
+  size: number;
+  onPress: () => void;
+  onCenter: (c: { x: number; y: number }) => void;
+}) {
   const { scale, onPressIn, onPressOut } = usePressScale(0.93);
   const ripple1 = useRef(new Animated.Value(0)).current;
   const ripple2 = useRef(new Animated.Value(0)).current;
+  const wrapRef = useRef<View>(null);
+  // ループを止めて別の動きに差し替えるために、開始した輪をここに持っておく。
+  const loopsRef = useRef<Animated.CompositeAnimation[]>([]);
+  const firedRef = useRef(false);
 
   // 2本の波紋を半周期ずらして流す。1本だと点滅、2本だと「広がり続けている」に見える。
   useEffect(() => {
@@ -180,6 +204,7 @@ function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
         }),
       ),
     );
+    loopsRef.current = loops;
 
     loops[0].start();
     const offset = setTimeout(() => loops[1].start(), RIPPLE_MS / 2);
@@ -189,6 +214,50 @@ function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
     };
   }, [ripple1, ripple2]);
 
+  // 円はボタンのど真ん中から出したい。画面のどこにいるかは測らないと分からない。
+  const reportCenter = () => {
+    wrapRef.current?.measureInWindow((x, y, w, h) => {
+      if (w > 0) onCenter({ x: x + w / 2, y: y + h / 2 });
+    });
+  };
+
+  // 押した合図。ゆっくり漂っていた波紋のループをここで断ち切り、
+  // 残りを一気に外へ飛ばす。「押したから動きが変わった」を作るのが目的。
+  const fire = () => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+
+    loopsRef.current.forEach((loop) => loop.stop());
+    Animated.parallel(
+      [ripple1, ripple2].map((value) =>
+        Animated.timing(value, {
+          toValue: 1,
+          duration: RIPPLE_RELEASE_MS,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ),
+    ).start();
+
+    // 沈めてから、バネで行き過ぎさせて戻す。まっすぐ戻すと押した手応えが出ない。
+    Animated.sequence([
+      Animated.timing(scale, {
+        toValue: 0.88,
+        duration: 110,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: 1,
+        friction: 4.5,
+        tension: 90,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    onPress();
+  };
+
   const ripple = (value: Animated.Value) => ({
     transform: [{ scale: value.interpolate({ inputRange: [0, 1], outputRange: [1, 1.42] }) }],
     opacity: value.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.45, 0] }),
@@ -196,7 +265,9 @@ function StartButton({ size, onPress }: { size: number; onPress: () => void }) {
 
   return (
     <Pressable
-      onPress={onPress}
+      ref={wrapRef}
+      onLayout={reportCenter}
+      onPress={fire}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
       accessibilityRole="button"
@@ -548,8 +619,20 @@ export default function App() {
   const clearedRef = useRef<Set<string>>(cleared);
   const chime = useAudioPlayer(require('./assets/chime.wav'));
   const pon = useAudioPlayer(require('./assets/pon.wav'));
+  // 開始音だけは合成ではなく既成の効果音。くらげ工匠(kurage-kosho.info)の
+  // 「ボタン081」。商用利用無料・クレジット不要・加工自由。素材の再配布は禁止。
+  // 3.5秒あり、画面が切り替わったあとも余韻として鳴り続ける。切らずにそのまま使う。
+  const startSound = useAudioPlayer(require('./assets/start.mp3'));
   // 同じ秒で何度も鳴らさないための「最後に鳴らした残り秒数」。0 は未再生。
   const countdownRef = useRef(0);
+  // 円を出す位置。ボタンを置いたときに測って覚えておく。
+  const [buttonCenter, setButtonCenter] = useState<{ x: number; y: number } | null>(null);
+  // 開始の演出中。円が広がりきるまで次の画面へは行かない。
+  const [launching, setLaunching] = useState(false);
+  const launchingRef = useRef(false);
+  const launch = useRef(new Animated.Value(0)).current;
+  // 切り替わった先の画面が浮かび上がるための値。
+  const enter = useRef(new Animated.Value(1)).current;
 
   // サイレントスイッチが入っていても終了音は鳴らす。
   useEffect(() => {
@@ -660,6 +743,18 @@ export default function App() {
     return () => clearInterval(id);
   }, [status]);
 
+  // 円が消えたあとに数字が浮かび上がる。演出の後半にあたる。
+  useEffect(() => {
+    if (status !== 'running' && status !== 'focus') return;
+    enter.setValue(0);
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: ENTER_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [status]);
+
   // アプリを離れたらタイマーは破棄。10分は10分、途中離脱は最初からやり直し。
   // ポモドーロも同じで、休憩中に離れてもそこで終わり。セット数も1に戻る。
   // 'inactive'（通知センターを少し引いた等）は含めない。誤爆が厳しすぎるため。
@@ -673,16 +768,42 @@ export default function App() {
     return () => sub.remove();
   }, [status]);
 
-  const start = () => {
+  // 始まりの合図。チャイムは「終わった」の音なので、ここでは鳴らさない。
+  // 休憩明けの自動再開だけは 0秒のチャイムが合図を兼ねるので、この関数を通らない。
+  //
+  // 押した瞬間に画面を差し替えると、自分が押したのか勝手に変わったのか分からない。
+  // 音を鳴らし、押されたボタンを見せ、そこから円が広がりきってから次の画面へ渡す。
+  // 待機中の波紋がそのまま画面いっぱいまで広がった、という見え方にする。
+  const launchInto = (go: () => void) => {
+    if (launchingRef.current) return; // 連打で2回走らせない
+    launchingRef.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    startPhase('running');
+    playSound(startSound);
+    setLaunching(true);
+    Animated.sequence([
+      Animated.delay(LAUNCH_HOLD_MS),
+      Animated.timing(launch, {
+        toValue: 1,
+        duration: LAUNCH_MS,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      go();
+      setLaunching(false);
+      launchingRef.current = false;
+      // 同じフレームで戻すと、縮んだ円が1コマだけ映ることがある。
+      requestAnimationFrame(() => launch.setValue(0));
+    });
   };
 
-  const startPomodoro = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setPomodoroSet(1);
-    startPhase('focus');
-  };
+  const start = () => launchInto(() => startPhase('running'));
+
+  const startPomodoro = () =>
+    launchInto(() => {
+      setPomodoroSet(1);
+      startPhase('focus');
+    });
 
   // 横向きは高さが一気に詰まるので、文字も余白も短い辺に合わせて縮める。
   const isLandscape = width > height;
@@ -696,6 +817,38 @@ export default function App() {
   // 決めると、背の低い端末で下の「つかいかた／きろく」が画面外に出る。
   // 帯の実測ではなく目安でよく、縮めるべきかどうかが分かれば足りる。
   const stripHeight = isLandscape ? 0 : topInset + 110;
+  // 円はボタンのいた場所から広げる。覆いきるには、そこから画面のいちばん
+  // 遠い角までが半径ぶん必要になる。
+  const center = buttonCenter ?? { x: width / 2, y: height / 2 };
+  const farthest = Math.max(
+    Math.hypot(center.x, center.y),
+    Math.hypot(width - center.x, center.y),
+    Math.hypot(center.x, height - center.y),
+    Math.hypot(width - center.x, height - center.y),
+  );
+  const launchCover = ((farthest * 2) / LAUNCH_SIZE) * 1.05;
+  const launchStyle = {
+    opacity: launch.interpolate({
+      inputRange: [0, 0.15, 0.7, 1],
+      outputRange: [0, 0.9, 0.75, 0],
+    }),
+    transform: [
+      { scale: launch.interpolate({ inputRange: [0, 1], outputRange: [0.35, launchCover] }) },
+    ],
+  };
+  // 円が広がるあいだに、裏のホーム画面は引いておく。
+  const leaveStyle = {
+    opacity: launch.interpolate({
+      inputRange: [0, 0.45],
+      outputRange: [1, 0],
+      extrapolate: 'clamp' as const,
+    }),
+  };
+  // 円が消えたあとに現れる側。下から浮かぶのではなく、少し小さい状態から起き上がる。
+  const enterStyle = {
+    opacity: enter,
+    transform: [{ scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
+  };
   const startSize = Math.min(220, (height - stripHeight) * 0.46);
 
   if (showTips !== false) {
@@ -726,7 +879,9 @@ export default function App() {
           「10 MIN」の上に乗ってしまう。ここで高さを取り、残りを中央が使う。
           横向きは縦の余白がないので、この帯ごと出さない。 */}
       {status === 'idle' && !isLandscape && (
-        <View style={[styles.streakArea, { paddingTop: topInset + 12 }]}>
+        <Animated.View
+          pointerEvents={launching ? 'none' : 'auto'}
+          style={[styles.streakArea, { paddingTop: topInset + 12 }, leaveStyle]}>
           <Pressable
             onPress={() => setShowRecord(true)}
             accessibilityRole="button"
@@ -759,13 +914,15 @@ export default function App() {
               })}
             </View>
           </Pressable>
-        </View>
+        </Animated.View>
       )}
 
       {status === 'idle' && (
-        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+        <Animated.View
+          pointerEvents={launching ? 'none' : 'auto'}
+          style={[styles.center, isLandscape && styles.centerLandscape, leaveStyle]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
-          <StartButton size={startSize} onPress={start} />
+          <StartButton size={startSize} onPress={start} onCenter={setButtonCenter} />
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
             動画も音楽もなし。{'\n'}10分だけ、手を動かす。
           </Text>
@@ -785,11 +942,11 @@ export default function App() {
               />
             )}
           </View>
-        </View>
+        </Animated.View>
       )}
 
       {status === 'running' && (
-        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+        <Animated.View style={[styles.center, isLandscape && styles.centerLandscape, enterStyle]}>
           <Text
             numberOfLines={1}
             adjustsFontSizeToFit
@@ -797,12 +954,12 @@ export default function App() {
             {formatRemaining(remainMs)}
           </Text>
           <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
-        </View>
+        </Animated.View>
       )}
 
       {/* 25分。10分の画面にセット数だけを足す。集中中に増える情報はこれ以上いらない。 */}
       {status === 'focus' && (
-        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+        <Animated.View style={[styles.center, isLandscape && styles.centerLandscape, enterStyle]}>
           <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>
             {pomodoroSet} セットめ
           </Text>
@@ -813,7 +970,7 @@ export default function App() {
             {formatRemaining(remainMs)}
           </Text>
           <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
-        </View>
+        </Animated.View>
       )}
 
       {/* 5分の休憩。時計を薄くして、同じ数字でも「進む時間」に見えないようにする。
@@ -835,7 +992,9 @@ export default function App() {
       )}
 
       {status === 'done' && (
-        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+        <Animated.View
+          pointerEvents={launching ? 'none' : 'auto'}
+          style={[styles.center, isLandscape && styles.centerLandscape, leaveStyle]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
           <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
           {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。
@@ -847,9 +1006,22 @@ export default function App() {
             style={{ marginTop: 64 * gap }}
           />
           <QuietButton label="おわる" onPress={stop} style={{ marginTop: 24 * gap }} />
-        </View>
+        </Animated.View>
       )}
 
+      {/* 押したところから広がって画面を覆い、薄れて消える円。待機中の波紋が
+          最後にひと息で広がりきった、という見立て。消えたあとに数字が現れる。 */}
+      {launching && (
+        <View pointerEvents="none" style={styles.launchOverlay}>
+          <Animated.View
+            style={[
+              styles.launchCircle,
+              { left: center.x - LAUNCH_SIZE / 2, top: center.y - LAUNCH_SIZE / 2 },
+              launchStyle,
+            ]}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -977,6 +1149,20 @@ const styles = StyleSheet.create({
   },
   quietPressed: {
     opacity: 0.5,
+  },
+  launchOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  launchCircle: {
+    position: 'absolute',
+    width: LAUNCH_SIZE,
+    height: LAUNCH_SIZE,
+    borderRadius: LAUNCH_SIZE / 2,
+    backgroundColor: ACCENT,
   },
   note: {
     color: MUTED,

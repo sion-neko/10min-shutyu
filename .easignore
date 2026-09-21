@@ -1,3 +1,6 @@
+# EAS Build 用。これがあると EAS CLI は .gitignore を見ずにこちらだけを読む。
+# .gitignore の内容をそのまま引き継いだうえで、assets/start.mp3 だけ除外しない。
+# あの効果音は再配布禁止で git には入れられないが、ビルドには必要なため。
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
 # dependencies
@@ -42,7 +45,3 @@ yarn-error.*
 
 # 作業用の一時ファイル置き場(コミットしない)
 _scratch/
-
-# 配布できない素材。くらげ工匠(kurage-kosho.info)の効果音は再配布が禁止されて
-# いるので、公開リポジトリには置かない。EAS Build には .easignore 側で渡している。
-assets/start.mp3

@@ -15,3 +15,18 @@ Upgraded from SDK 54 on 2026-09-21. Things that changed in 55-57 and now apply h
   `style` and `hidden`, so nothing to do).
 - `@expo/vector-icons` is deprecated in favour of `@react-native-vector-icons/*`. It was unused
   here and has been removed.
+
+# git に入っていない音源
+
+`assets/start.mp3`（はじめるボタンの音）は **リポジトリに含まれていません**。
+くらげ工匠 (http://www.kurage-kosho.info/) の「ボタン081」で、商用利用無料・
+クレジット不要・加工自由ですが、**素材の再配布が禁止**されています。このリポジトリは
+公開されているため、コミットすると再配布にあたります。
+
+clone しただけでは音が鳴らず、Metro の `require` も解決できません。上記サイトの
+「システム音・電子音 → ボタン音」から ボタン081 を落とし、`assets/start.mp3` という
+名前で置いてください。
+
+EAS Build には `.easignore` 経由で渡しています。`.easignore` があると EAS CLI は
+`.gitignore` を読まなくなるので、**`.gitignore` に何か足したら `.easignore` にも
+同じ行を足す**こと。片方だけ直すと、無視したいものがビルドに紛れ込みます。
