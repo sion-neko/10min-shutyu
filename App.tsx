@@ -3,6 +3,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -48,36 +49,26 @@ const TIPS_SEEN_KEY = 'tipsSeen';
 const CLEARED_DAYS_KEY = 'clearedDays';
 
 const PRAISES = [
-  'いい集中だ！',
-  '10分、やりきった。',
-  'よく始めた。\nそれが一番むずかしい。',
-  'その調子。',
-  '手が止まらないなら、\n止めなくていい。',
-  '今日の自分、悪くない。',
-  '10分前の自分に\n感謝しよう。',
-  '手を動かした。\nそれがすべて。',
-  'ちゃんと、進んだ。',
-  '何もしなかった10分とは、\n確かに違う。',
-  '上出来。',
-  '続きは、いつでも。',
-  '止まらずに来たね。',
-  'はじめられる人だ。',
-  '今日はもう、勝っている。',
-  '小さく進むのが、\n結局いちばん速い。',
-  'やる気は、\nあとからついてきた。',
-  'ひとつ、積み上がった。',
-  'まだ、いける気がする？',
-  '逃げなかった。',
-  '10分ぶん、前へ。',
-  'きちんと座っていた。\nそれで十分。',
-  '完璧じゃなくていい。\n続けばいい。',
-  '手が覚えはじめている。',
-  '気分より、行動が勝った。',
-  'これを毎日やったら、\nどうなると思う？',
-  'ひと区切り。\n伸びをしよう。',
-  '誰も見ていなくても、\nやった。',
-  '明日の自分が、\n少し楽になった。',
-  'また戻ってくればいい。',
+  'おつかれさま！',
+  '10分やりきったね！',
+  'ナイス集中！',
+  'やるじゃん！',
+  'えらい！\nちゃんと始められたね',
+  '始めるのがいちばん大変なんだよね。\nよくやった！',
+  'いい感じに集中できたね',
+  '今日の10分、おしまい！',
+  'この調子でいこう',
+  '今日もちゃんとやったね',
+  'すごい、最後までできた！',
+  'のってきたなら、\nもう少しやってもいいかも',
+  'ちょっと伸びでもしよっか',
+  '水でも飲んで、ひと休みしよう',
+  'まだいけそう？',
+  'よくがんばりました',
+  'いいスタートが切れたね',
+  'ちゃんと手が動いてたね',
+  'やる気、出てきた？',
+  '明日もこの調子で！',
 ];
 
 // 続けて10分をやったときに同じ言葉が並ぶとランダムに見えないので、
@@ -136,34 +127,48 @@ function KeepScreenAwake() {
   return null;
 }
 
-// 押した瞬間に少し沈む。それだけでボタンは「触れる物」になる。
-// Reanimated は足さず RN 標準の Animated だけで組む（Expo Go 54 でそのまま動く）。
-function usePressScale(to: number) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const spring = (toValue: number) =>
-    Animated.spring(scale, {
-      toValue,
-      friction: 6,
-      tension: 260,
-      useNativeDriver: true,
-    }).start();
+// ボタンはツヤや影ではなく「厚み」で押せる物に見せる。同じ形の濃い面を下に
+// ずらして敷き、押すと上の面がその厚みのぶんだけ沈む。
+// Reanimated は足さず RN 標準の Animated だけで組む。
+// press は 0 で浮いている、1 で沈みきった状態。
+function usePressSink() {
+  const press = useRef(new Animated.Value(0)).current;
 
   return {
-    scale,
-    onPressIn: () => spring(to),
-    onPressOut: () => spring(1),
+    press,
+    onPressIn: () =>
+      Animated.timing(press, {
+        toValue: 1,
+        duration: 80,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start(),
+    // 離したらバネで少し行き過ぎて戻す。まっすぐ戻すと押した手応えが出ない。
+    onPressOut: () =>
+      Animated.spring(press, {
+        toValue: 0,
+        friction: 4,
+        tension: 160,
+        useNativeDriver: true,
+      }).start(),
   };
 }
 
-const RIPPLE_MS = 2600;
+function sinkBy(press: Animated.Value, depth: number) {
+  return {
+    transform: [{ translateY: press.interpolate({ inputRange: [0, 1], outputRange: [0, depth] }) }],
+  };
+}
+
+// 待っているあいだ、はじめるボタンはときどきひとりでに「ぽちっ」と沈む。
+// 押したらどうなるかを先に見せて、押したくさせる。この間隔で繰り返す。
+const IDLE_PRESS_GAP_MS = 2000;
 
 // 押してから画面が切り替わるまで。押した実感を見せる間 → 円が広がる、の順。
-// この間にボタンが沈んで弾み、波紋が外へ飛ぶ。短くすると押した手応えが消える。
+// この間にボタンが沈んで弾む。短くすると押した手応えが消える。
 // 全体で 1秒強かける。10分を始める場面なので、急かすより落ち着いて渡したい。
 const LAUNCH_HOLD_MS = 280;
 const LAUNCH_MS = 700;
-// 押した合図に、漂っていた波紋を外へ飛ばす時間。
-const RIPPLE_RELEASE_MS = 520;
 // 切り替わった先が浮かび上がる時間。
 const ENTER_MS = 420;
 // 広がる円のもとの直径。ここから画面の対角まで引き伸ばす。
@@ -184,35 +189,42 @@ function StartButton({
   onPress: () => void;
   onCenter: (c: { x: number; y: number }) => void;
 }) {
-  const { scale, onPressIn, onPressOut } = usePressScale(0.93);
-  const ripple1 = useRef(new Animated.Value(0)).current;
-  const ripple2 = useRef(new Animated.Value(0)).current;
+  const { press, onPressIn, onPressOut } = usePressSink();
+  // 厚み。ボタンが小さい端末では一緒に薄くする。
+  const depth = Math.round(size * 0.045);
   const wrapRef = useRef<View>(null);
-  // ループを止めて別の動きに差し替えるために、開始した輪をここに持っておく。
-  const loopsRef = useRef<Animated.CompositeAnimation[]>([]);
+  // 指が触れたら止めるために、ひとりでに沈む動きをここに持っておく。
+  const idleRef = useRef<Animated.CompositeAnimation | null>(null);
   const firedRef = useRef(false);
 
-  // 2本の波紋を半周期ずらして流す。1本だと点滅、2本だと「広がり続けている」に見える。
-  useEffect(() => {
-    const loops = [ripple1, ripple2].map((value) =>
-      Animated.loop(
-        Animated.timing(value, {
+  const startIdle = () => {
+    idleRef.current?.stop();
+    const idle = Animated.loop(
+      Animated.sequence([
+        Animated.delay(IDLE_PRESS_GAP_MS),
+        Animated.timing(press, {
           toValue: 1,
-          duration: RIPPLE_MS,
+          duration: 110,
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
-      ),
+        Animated.delay(120),
+        Animated.spring(press, {
+          toValue: 0,
+          friction: 5,
+          tension: 140,
+          useNativeDriver: true,
+        }),
+      ]),
     );
-    loopsRef.current = loops;
+    idleRef.current = idle;
+    idle.start();
+  };
 
-    loops[0].start();
-    const offset = setTimeout(() => loops[1].start(), RIPPLE_MS / 2);
-    return () => {
-      clearTimeout(offset);
-      loops.forEach((loop) => loop.stop());
-    };
-  }, [ripple1, ripple2]);
+  useEffect(() => {
+    startIdle();
+    return () => idleRef.current?.stop();
+  }, []);
 
   // 円はボタンのど真ん中から出したい。画面のどこにいるかは測らないと分からない。
   const reportCenter = () => {
@@ -221,106 +233,58 @@ function StartButton({
     });
   };
 
-  // 押した合図。ゆっくり漂っていた波紋のループをここで断ち切り、
-  // 残りを一気に外へ飛ばす。「押したから動きが変わった」を作るのが目的。
+  const pressIn = () => {
+    idleRef.current?.stop();
+    onPressIn();
+  };
+
+  // 押さずに指をずらして離れたときは、また待っている動きに戻る。
+  const pressOut = () => {
+    onPressOut();
+    setTimeout(() => {
+      if (!firedRef.current) startIdle();
+    }, 0);
+  };
+
   const fire = () => {
     if (firedRef.current) return;
     firedRef.current = true;
-
-    loopsRef.current.forEach((loop) => loop.stop());
-    Animated.parallel(
-      [ripple1, ripple2].map((value) =>
-        Animated.timing(value, {
-          toValue: 1,
-          duration: RIPPLE_RELEASE_MS,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ),
-    ).start();
-
-    // 沈めてから、バネで行き過ぎさせて戻す。まっすぐ戻すと押した手応えが出ない。
-    Animated.sequence([
-      Animated.timing(scale, {
-        toValue: 0.88,
-        duration: 110,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.spring(scale, {
-        toValue: 1,
-        friction: 4.5,
-        tension: 90,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
+    idleRef.current?.stop();
     onPress();
   };
-
-  const ripple = (value: Animated.Value) => ({
-    transform: [{ scale: value.interpolate({ inputRange: [0, 1], outputRange: [1, 1.42] }) }],
-    opacity: value.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.45, 0] }),
-  });
 
   return (
     <Pressable
       ref={wrapRef}
       onLayout={reportCenter}
       onPress={fire}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
       accessibilityRole="button"
       accessibilityLabel="10分をはじめる"
-      style={[styles.startWrap, { width: size, height: size }]}>
-      {/* 外へ広がって消えていく波紋。「ここを押す」を無言で指している。 */}
-      <Animated.View
+      style={{ width: size, height: size + depth }}>
+      <View
         pointerEvents="none"
         style={[
-          styles.startRing,
-          { width: size, height: size, borderRadius: size / 2 },
-          ripple(ripple1),
+          styles.startEdge,
+          { width: size, height: size, borderRadius: size / 2, top: depth },
         ]}
       />
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.startRing,
-          { width: size, height: size, borderRadius: size / 2 },
-          ripple(ripple2),
-        ]}
-      />
-
       <Animated.View
         style={[
           styles.startButton,
           { width: size, height: size, borderRadius: size / 2 },
-          { transform: [{ scale }] },
+          sinkBy(press, depth),
         ]}>
-        {/* 上から光が当たっているように見せる面。平面だと押せる物に見えない。
-            薄い層を3枚ずらして重ね、境目を1本の線ではなく緩やかな階調にする。 */}
-        {[0.3, 0.42, 0.54].map((edge) => (
-          <View
-            key={edge}
-            pointerEvents="none"
-            style={[
-              styles.startSheen,
-              {
-                width: size * 1.5,
-                height: size * 1.5,
-                borderRadius: size * 0.75,
-                top: (edge - 1.5) * size,
-                left: -size * 0.25,
-              },
-            ]}
-          />
-        ))}
         <Text style={styles.startLabel}>はじめる</Text>
         <Text style={styles.startSub}>10:00</Text>
       </Animated.View>
     </Pressable>
   );
 }
+
+// 横長の主ボタンの厚み。丸ボタンより小さいので薄くする。
+const PRIMARY_DEPTH = 5;
 
 // 「ポモドーロで続ける」「わかった」など、次に進むための主ボタン。
 // sub は丸ボタンの「はじめる / 10:00」と同じで、押した先の長さを添えるためのもの。
@@ -335,7 +299,7 @@ function PrimaryButton({
   onPress: () => void;
   style?: object;
 }) {
-  const { scale, onPressIn, onPressOut } = usePressScale(0.95);
+  const { press, onPressIn, onPressOut } = usePressSink();
 
   return (
     <Pressable
@@ -344,17 +308,9 @@ function PrimaryButton({
       onPressOut={onPressOut}
       accessibilityRole="button"
       accessibilityLabel={sub === undefined ? undefined : `${label} ${sub}`}
-      style={style}>
-      <Animated.View style={[styles.primaryButton, { transform: [{ scale }] }]}>
-        {/* 丸ボタンと同じ考え方で、高さちがいの層を重ねて境目をぼかす。
-            1枚だと濃い青の上で1本の線に見えてしまう。 */}
-        {[0.34, 0.44, 0.54].map((height) => (
-          <View
-            key={height}
-            pointerEvents="none"
-            style={[styles.primarySheen, { height: `${height * 100}%` }]}
-          />
-        ))}
+      style={[{ paddingBottom: PRIMARY_DEPTH }, style]}>
+      <View pointerEvents="none" style={[styles.primaryEdge, { top: PRIMARY_DEPTH }]} />
+      <Animated.View style={[styles.primaryButton, sinkBy(press, PRIMARY_DEPTH)]}>
         <Text style={styles.primaryLabel}>{label}</Text>
         {sub !== undefined && <Text style={styles.primarySub}>{sub}</Text>}
       </Animated.View>
@@ -384,7 +340,6 @@ function QuietButton({
 }
 
 // 1枚に詰めると読むのがつらいので、話の切れ目でページを分ける。
-// 文面は変えていない。
 function tipsPages() {
   return [
     <>
@@ -392,26 +347,26 @@ function tipsPages() {
       <Text style={styles.tipsBody}>10分だけ集中するためのアプリです。</Text>
     </>,
     <>
-      <Text style={styles.tipsTitle}>やる気は、あとから出てくる</Text>
+      <Text style={styles.tipsTitle}>やる気はあとから出てくるらしい</Text>
       <Text style={styles.tipsBody}>
         やる気が出るのを待っていると、だいたい何も始まらないですよね。
-        でもやる気って、動く前じゃなくて動いたあとから出てくるみたいですよ！
-        つらさのピークは始める前で、手を動かし始めると案外そうでもない、という研究もあります。
+        でもやる気は、手を動かしはじめてから出てくるものらしいです。
+        始める前がいちばんしんどくて、やってみると案外そうでもない、という研究もあります。
       </Text>
     </>,
     <>
-      <Text style={styles.tipsTitle}>10分で、わざと止める</Text>
+      <Text style={styles.tipsTitle}>10分で止まるのはわざとです</Text>
       <Text style={styles.tipsBody}>
-        しかも人は、10分で強制的に中断されると続きをやりたくなるそうです。
-        終わったあとにもう少しやりたくなったら、それが狙いどおりです。
+        人は途中で区切られると、続きが気になってやりたくなるそうです。
+        10分たって「もうちょっとやりたいな」と思ったら、作戦成功です。
       </Text>
-      <Text style={styles.tipsBody}>このアプリを使って、やるべきことをやりましょう！</Text>
+      <Text style={styles.tipsBody}>さっそく10分、やってみましょう！</Text>
     </>,
     <>
-      <Text style={styles.tipsTitle}>ルールは3つだけ</Text>
-      <Text style={styles.tipsRule}>1. 途中で止める方法はありません</Text>
+      <Text style={styles.tipsTitle}>ルールは3つ</Text>
+      <Text style={styles.tipsRule}>1. 途中で止めることはできません</Text>
       <Text style={styles.tipsRule}>2. アプリを離れると最初からやり直しです</Text>
-      <Text style={styles.tipsRule}>3. 動画も音楽もなし。ただ10分、手を動かします</Text>
+      <Text style={styles.tipsRule}>3. 動画や音楽は見ないで、10分だけ手を動かします</Text>
     </>,
   ];
 }
@@ -924,7 +879,7 @@ export default function App() {
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
           <StartButton size={startSize} onPress={start} onCenter={setButtonCenter} />
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
-            動画も音楽もなし。{'\n'}10分だけ、手を動かす。
+            まずは10分だけやってみよう
           </Text>
           {/* 縦向きは上の帯がきろくの入口になるので、ここには出さない。
               横向きは帯ごと出せないので、ここだけが入口になる。 */}
@@ -977,6 +932,15 @@ export default function App() {
           途中で止められないルールの唯一の抜け道がここ。「おわる」はこの5分にしかない。 */}
       {status === 'break' && (
         <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+          {/* アイコンのおばけは、休む画面とやりきった画面にだけ出す。
+              数字を追う画面に置くと、集中の邪魔になる。 */}
+          {!isLandscape && (
+            <Image
+              source={require('./assets/ghost-sleep.png')}
+              style={[styles.ghostSleep, { marginBottom: 16 * gap }]}
+              accessibilityIgnoresInvertColors
+            />
+          )}
           <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>きゅうけい</Text>
           <Text
             numberOfLines={1}
@@ -995,6 +959,13 @@ export default function App() {
         <Animated.View
           pointerEvents={launching ? 'none' : 'auto'}
           style={[styles.center, isLandscape && styles.centerLandscape, leaveStyle]}>
+          {!isLandscape && (
+            <Image
+              source={require('./assets/ghost-laugh.png')}
+              style={[styles.ghostLaugh, { marginBottom: 20 * gap }]}
+              accessibilityIgnoresInvertColors
+            />
+          )}
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
           <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
           {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。
@@ -1026,27 +997,28 @@ export default function App() {
   );
 }
 
-// ほんのり青みのある明るい灰。純白より目が疲れず、白いカードや
-// ボタンの影が沈んで見える。
-const BG = '#F3F6FC';
-// 黒ではなく濃紺。背景の青みと同じ側に寄せると画面がひとつにまとまる。
-const INK = '#16234A';
+// 色はアプリアイコンのストップウォッチから取る。背景は文字盤のクリーム色。
+// 純白より目が疲れず、白いカードが浮いて見える。
+const BG = '#FBF5EC';
+// 黒ではなく暖かい焦げ茶。背景のクリームと同じ側に寄せると画面がひとつにまとまる。
+const INK = '#2E2620';
 const TEXT = INK;
-const MUTED = 'rgba(22, 35, 74, 0.65)';
-const FAINT = 'rgba(22, 35, 74, 0.38)';
-// 画面のほとんどが背景と同じ青みの濃淡なので、はっきり色がついているのは
+const MUTED = 'rgba(46, 38, 32, 0.65)';
+const FAINT = 'rgba(46, 38, 32, 0.38)';
+// 画面のほとんどが背景と同じクリームの濃淡なので、はっきり色がついているのは
 // 「押すところ」だけ。迷いようがない。
-// 明るい背景では淡い青は沈むので、暗い背景のときより濃いほうへ振る。
-const ACCENT = '#2F6FE4';
-const ACCENT_EDGE = '#5B8DEF';
-const ON_ACCENT = '#FFFFFF';
+// アイコンの背景のオレンジ。白い文字は沈むので、文字は焦げ茶にする。
+const ACCENT = '#F6A56A';
+// ボタンの厚み。影ではなく、同じ色相を濃くした面で見せる。
+const ACCENT_EDGE = '#DE8646';
+const ON_ACCENT = INK;
 const CARD = '#FFFFFF';
-// 記録のドットはあえて色を持たせない。ここに青を足すと、押してほしい
+// 記録のドットはあえて色を持たせない。ここに赤を足すと、押してほしい
 // 丸ボタンと目線を取り合ってしまう。記録は眺めるもので、押すものではない。
-const DOT_ON = 'rgba(22, 35, 74, 0.72)';
-const DOT_OFF = 'rgba(22, 35, 74, 0.1)';
-const DOT_TODAY = 'rgba(22, 35, 74, 0.28)';
-const WEEKDAY = 'rgba(22, 35, 74, 0.5)';
+const DOT_ON = 'rgba(46, 38, 32, 0.72)';
+const DOT_OFF = 'rgba(46, 38, 32, 0.1)';
+const DOT_TODAY = 'rgba(46, 38, 32, 0.28)';
+const WEEKDAY = 'rgba(46, 38, 32, 0.5)';
 
 const styles = StyleSheet.create({
   root: {
@@ -1068,43 +1040,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 4,
   },
-  startWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  startRing: {
-    position: 'absolute',
-    borderWidth: 1.5,
-    borderColor: ACCENT,
-  },
   startButton: {
+    position: 'absolute',
+    top: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
     backgroundColor: ACCENT,
-    borderWidth: 1,
-    borderColor: ACCENT_EDGE,
-    // 暗い背景から浮き上がらせる。押し込みのアニメーションが効いて見える。
-    // 強くしすぎると波紋が発光に溶けて見えなくなるので控えめに。
-    shadowColor: ACCENT,
-    shadowOpacity: 0.4,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 14,
   },
-  // 濃い青の上では白の層がそのまま縞に見えるので、暗い背景のときより薄くする。
-  startSheen: {
+  startEdge: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: ACCENT_EDGE,
   },
   startLabel: {
     color: ON_ACCENT,
     fontSize: 28,
-    fontWeight: '600',
+    fontWeight: '700',
     letterSpacing: 2,
   },
   startSub: {
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: MUTED,
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 3,
@@ -1116,33 +1070,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 44,
     paddingVertical: 17,
     borderRadius: 999,
-    overflow: 'hidden',
     backgroundColor: ACCENT,
-    borderWidth: 1,
-    borderColor: ACCENT_EDGE,
-    shadowColor: ACCENT,
-    shadowOpacity: 0.34,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
   },
-  // 上ほど明るくして厚みを出す。高さは重ねる側で決める。
-  primarySheen: {
+  primaryEdge: {
     position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    bottom: 0,
+    borderRadius: 999,
+    backgroundColor: ACCENT_EDGE,
   },
   primaryLabel: {
     color: ON_ACCENT,
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     letterSpacing: 1,
     textAlign: 'center',
   },
   primarySub: {
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: MUTED,
     fontSize: 12,
     marginTop: 3,
     textAlign: 'center',
@@ -1164,6 +1110,15 @@ const styles = StyleSheet.create({
     borderRadius: LAUNCH_SIZE / 2,
     backgroundColor: ACCENT,
   },
+  // 切り抜きの縦横比のまま置く。横向きは縦の余白がないので出さない。
+  ghostLaugh: {
+    width: 104,
+    height: 103,
+  },
+  ghostSleep: {
+    width: 104,
+    height: 86,
+  },
   note: {
     color: MUTED,
     fontSize: 14,
@@ -1181,7 +1136,7 @@ const styles = StyleSheet.create({
     color: MUTED,
   },
   hint: {
-    color: 'rgba(22, 35, 74, 0.4)',
+    color: 'rgba(46, 38, 32, 0.4)',
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
@@ -1413,7 +1368,7 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   tipsBody: {
-    color: 'rgba(22, 35, 74, 0.78)',
+    color: 'rgba(46, 38, 32, 0.78)',
     fontSize: 16,
     lineHeight: 28,
     marginBottom: 20,
