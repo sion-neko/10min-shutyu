@@ -19,6 +19,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Path } from 'react-native-svg';
 
 import {
@@ -47,6 +48,14 @@ const BREAK_MS = 5 * 60 * 1000;
 // 休憩の終わりは残り5秒から「ぽん」で数える。25分がいきなり始まらないように。
 const COUNTDOWN_FROM = 5;
 const TIPS_SEEN_KEY = 'tipsSeen';
+
+// 起動画面は、最初に出す画面（Tips かホームか）が決まるまで残しておく。決まる前に
+// 消すと、空の背景が一瞬見えてから中身がパッと出る。消すときもゆっくり引く。
+// fade は iOS にしか効かないので、Android は下の APPEAR_MS の浮かび上がりで補う。
+SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.setOptions({ duration: 500, fade: true });
+// 起動画面が引いたあと、最初の画面が浮かび上がる時間。
+const APPEAR_MS = 520;
 const CLEARED_DAYS_KEY = 'clearedDays';
 
 const PRAISES = [
@@ -633,6 +642,8 @@ export default function App() {
   // Tips を閉じたあとにホームが浮かび上がるための値。
   const homeEnter = useRef(new Animated.Value(1)).current;
   const homeEnterPending = useRef(false);
+  // 起動直後の画面が浮かび上がるための値。一度 1 になったらそのまま。
+  const appear = useRef(new Animated.Value(0)).current;
 
   // サイレントスイッチが入っていても終了音は鳴らす。
   useEffect(() => {
@@ -668,6 +679,21 @@ export default function App() {
       // 保存できなくても今回の10分は成立している。記録だけ諦める。
     });
   };
+
+  // 最初の画面が決まったら起動画面を引き、入れ替わりに中身を浮かび上がらせる。
+  // 読み込みに失敗しても showTips は false に決まるので、起動画面が残り続けることはない。
+  const appeared = useRef(false);
+  useEffect(() => {
+    if (showTips === null || appeared.current) return;
+    appeared.current = true;
+    SplashScreen.hide();
+    Animated.timing(appear, {
+      toValue: 1,
+      duration: APPEAR_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [showTips]);
 
   // ホームが描かれてから浮かび上がらせる。描く前に動かすと、出た瞬間には終わっている。
   useEffect(() => {
@@ -825,7 +851,7 @@ export default function App() {
   const clockSize = Math.min(width * 0.34, height * 0.42);
   // safe-area のライブラリは入れずに済ませる。この余白を使う帯は
   // 縦向きでしか出さないので、縦向きのぶんだけ考えればいい。
-  const topInset = Platform.OS === 'android' ? RNStatusBar.currentHeight ?? 0 : 56;
+  const topInset = Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 0) : 56;
   const streak = streakOf(cleared);
   // 丸ボタンは画面の高さではなく「帯を引いた残り」から決める。全体の高さで
   // 決めると、背の低い端末で下の「つかいかた／きろく」が画面外に出る。
@@ -869,12 +895,23 @@ export default function App() {
     transform: [{ scale: homeEnter.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
   };
   const startSize = Math.min(220, (height - stripHeight) * 0.46);
+  // 起動画面が引いたあとに最初の画面が現れるときの動き。中身だけを動かし、背景は
+  // 起動画面と同じ色のまま置いておく。
+  const appearStyle = {
+    flex: 1,
+    opacity: appear,
+    transform: [{ scale: appear.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
+  };
 
   if (showTips !== false) {
     return (
       <View style={styles.root}>
         <StatusBar style="dark" />
-        {showTips === true && <Tips onDismiss={dismissTips} />}
+        {showTips === true && (
+          <Animated.View style={appearStyle}>
+            <Tips onDismiss={dismissTips} />
+          </Animated.View>
+        )}
       </View>
     );
   }
@@ -892,171 +929,168 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar style="dark" hidden={isCounting(status)} />
       {isCounting(status) && <KeepScreenAwake />}
-
-      {/* 連続日数と直近1週間。開かなくても見える位置に置く。
+      <Animated.View style={appearStyle}>
+        {/* 連続日数と直近1週間。開かなくても見える位置に置く。
           場所を取る帯なので絶対配置にはしない。重ねると小さい端末で
           「10 MIN」の上に乗ってしまう。ここで高さを取り、残りを中央が使う。
           横向きは縦の余白がないので、この帯ごと出さない。 */}
-      {status === 'idle' && !isLandscape && (
-        <Animated.View
-          pointerEvents={launching ? 'none' : 'auto'}
-          style={[styles.streakArea, { paddingTop: topInset + 12 }, homeStyle]}>
-          <Pressable
-            onPress={() => setShowRecord(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`きろくを見る。連続${streak}日`}
-            style={({ pressed }) => [styles.streakCard, pressed && styles.quietPressed]}>
-            <Flame size={26} lit={streak > 0} />
+        {status === 'idle' && !isLandscape && (
+          <Animated.View
+            pointerEvents={launching ? 'none' : 'auto'}
+            style={[styles.streakArea, { paddingTop: topInset + 12 }, homeStyle]}>
+            <Pressable
+              onPress={() => setShowRecord(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`きろくを見る。連続${streak}日`}
+              style={({ pressed }) => [styles.streakCard, pressed && styles.quietPressed]}>
+              <Flame size={26} lit={streak > 0} />
 
-            {/* 0日でも出す。出たり消えたりすると、この場所に何があるのか覚えられない。 */}
-            <View style={styles.streakCount}>
-              <Text style={styles.streakLabel}>連続</Text>
-              <Text style={styles.streakValue}>
-                {streak}
-                <Text style={styles.streakUnit}>日</Text>
-              </Text>
-            </View>
+              {/* 0日でも出す。出たり消えたりすると、この場所に何があるのか覚えられない。 */}
+              <View style={styles.streakCount}>
+                <Text style={styles.streakLabel}>連続</Text>
+                <Text style={styles.streakValue}>
+                  {streak}
+                  <Text style={styles.streakUnit}>日</Text>
+                </Text>
+              </View>
 
-            {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
+              {/* 丸を等間隔に並べただけだと、ページ送りのドットにしか見えない。
                 曜日を添えると一目で「日付の並び」になる。 */}
-            <View style={styles.weekDays}>
-              {lastDays(WEEK_DAYS).map((date, i) => {
-                const isToday = i === WEEK_DAYS - 1;
-                return (
-                  <View key={dayKey(date)} style={styles.weekDay}>
-                    <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
-                      {weekdayLabelOf(date)}
-                    </Text>
-                    <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={10} />
-                  </View>
-                );
-              })}
-            </View>
-          </Pressable>
-        </Animated.View>
-      )}
+              <View style={styles.weekDays}>
+                {lastDays(WEEK_DAYS).map((date, i) => {
+                  const isToday = i === WEEK_DAYS - 1;
+                  return (
+                    <View key={dayKey(date)} style={styles.weekDay}>
+                      <Text style={[styles.weekDayLabel, isToday && styles.weekDayLabelToday]}>
+                        {weekdayLabelOf(date)}
+                      </Text>
+                      <Dot done={cleared.has(dayKey(date))} isToday={isToday} size={10} />
+                    </View>
+                  );
+                })}
+              </View>
+            </Pressable>
+          </Animated.View>
+        )}
 
-      {status === 'idle' && (
-        <Animated.View
-          pointerEvents={launching ? 'none' : 'auto'}
-          style={[styles.center, isLandscape && styles.centerLandscape, homeStyle]}>
-          <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
-          <StartButton size={startSize} onPress={start} onCenter={setButtonCenter} />
-          <Text style={[styles.note, { marginTop: 48 * gap }]}>
-            まずは10分だけやってみよう
-          </Text>
-          {/* 縦向きは上の帯がきろくの入口になるので、ここには出さない。
+        {status === 'idle' && (
+          <Animated.View
+            pointerEvents={launching ? 'none' : 'auto'}
+            style={[styles.center, isLandscape && styles.centerLandscape, homeStyle]}>
+            <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
+            <StartButton size={startSize} onPress={start} onCenter={setButtonCenter} />
+            <Text style={[styles.note, { marginTop: 48 * gap }]}>まずは10分だけやってみよう</Text>
+            {/* 縦向きは上の帯がきろくの入口になるので、ここには出さない。
               横向きは帯ごと出せないので、ここだけが入口になる。 */}
-          <View style={[styles.quietRow, { marginTop: 24 * gap }]}>
-            <QuietButton
-              label="このアプリについて"
-              onPress={() => setShowTips(true)}
-              style={styles.faint}
-            />
-            {isLandscape && (
+            <View style={[styles.quietRow, { marginTop: 24 * gap }]}>
               <QuietButton
-                label="きろく"
-                onPress={() => setShowRecord(true)}
+                label="このアプリについて"
+                onPress={() => setShowTips(true)}
                 style={styles.faint}
               />
-            )}
-          </View>
-        </Animated.View>
-      )}
+              {isLandscape && (
+                <QuietButton
+                  label="きろく"
+                  onPress={() => setShowRecord(true)}
+                  style={styles.faint}
+                />
+              )}
+            </View>
+          </Animated.View>
+        )}
 
-      {status === 'running' && (
-        <Animated.View style={[styles.center, isLandscape && styles.centerLandscape, enterStyle]}>
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            style={[styles.clock, { fontSize: clockSize }]}>
-            {formatRemaining(remainMs)}
-          </Text>
-          <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
-        </Animated.View>
-      )}
+        {status === 'running' && (
+          <Animated.View style={[styles.center, isLandscape && styles.centerLandscape, enterStyle]}>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={[styles.clock, { fontSize: clockSize }]}>
+              {formatRemaining(remainMs)}
+            </Text>
+            <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
+          </Animated.View>
+        )}
 
-      {/* 25分。10分の画面にセット数だけを足す。集中中に増える情報はこれ以上いらない。 */}
-      {status === 'focus' && (
-        <Animated.View style={[styles.center, isLandscape && styles.centerLandscape, enterStyle]}>
-          <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>
-            {pomodoroSet} セットめ
-          </Text>
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            style={[styles.clock, { fontSize: clockSize }]}>
-            {formatRemaining(remainMs)}
-          </Text>
-          <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
-        </Animated.View>
-      )}
+        {/* 25分。10分の画面にセット数だけを足す。集中中に増える情報はこれ以上いらない。 */}
+        {status === 'focus' && (
+          <Animated.View style={[styles.center, isLandscape && styles.centerLandscape, enterStyle]}>
+            <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>{pomodoroSet} セットめ</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={[styles.clock, { fontSize: clockSize }]}>
+              {formatRemaining(remainMs)}
+            </Text>
+            <Text style={[styles.hint, { marginTop: 24 * gap }]}>アプリを離れるとリセット</Text>
+          </Animated.View>
+        )}
 
-      {/* 5分の休憩。時計を薄くして、同じ数字でも「進む時間」に見えないようにする。
+        {/* 5分の休憩。時計を薄くして、同じ数字でも「進む時間」に見えないようにする。
           途中で止められないルールの唯一の抜け道がここ。「おわる」はこの5分にしかない。 */}
-      {status === 'break' && (
-        <View style={[styles.center, isLandscape && styles.centerLandscape]}>
-          {/* アイコンのおばけは、休む画面とやりきった画面にだけ出す。
+        {status === 'break' && (
+          <View style={[styles.center, isLandscape && styles.centerLandscape]}>
+            {/* アイコンのおばけは、休む画面とやりきった画面にだけ出す。
               数字を追う画面に置くと、集中の邪魔になる。 */}
-          {!isLandscape && (
-            <Image
-              source={require('./assets/ghost-sleep.png')}
-              style={[styles.ghostSleep, { marginBottom: 16 * gap }]}
-              accessibilityIgnoresInvertColors
-            />
-          )}
-          <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>きゅうけい</Text>
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            style={[styles.clock, styles.clockBreak, { fontSize: clockSize }]}>
-            {formatRemaining(remainMs)}
-          </Text>
-          <Text style={[styles.hint, { marginTop: 24 * gap }]}>
-            アプリを離れるとリセット{'\n'}0になると {pomodoroSet + 1} セットめが始まります
-          </Text>
-          <QuietButton label="おわる" onPress={stop} style={{ marginTop: 32 * gap }} />
-        </View>
-      )}
+            {!isLandscape && (
+              <Image
+                source={require('./assets/ghost-sleep.png')}
+                style={[styles.ghostSleep, { marginBottom: 16 * gap }]}
+                accessibilityIgnoresInvertColors
+              />
+            )}
+            <Text style={[styles.eyebrow, { marginBottom: 16 * gap }]}>きゅうけい</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={[styles.clock, styles.clockBreak, { fontSize: clockSize }]}>
+              {formatRemaining(remainMs)}
+            </Text>
+            <Text style={[styles.hint, { marginTop: 24 * gap }]}>
+              アプリを離れるとリセット{'\n'}0になると {pomodoroSet + 1} セットめが始まります
+            </Text>
+            <QuietButton label="おわる" onPress={stop} style={{ marginTop: 32 * gap }} />
+          </View>
+        )}
 
-      {status === 'done' && (
-        <Animated.View
-          pointerEvents={launching ? 'none' : 'auto'}
-          style={[styles.center, isLandscape && styles.centerLandscape, leaveStyle]}>
-          {!isLandscape && (
-            <Image
-              source={require('./assets/ghost-laugh.png')}
-              style={[styles.ghostLaugh, { marginBottom: 20 * gap }]}
-              accessibilityIgnoresInvertColors
-            />
-          )}
-          <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
-          <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
-          {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。
-              もう10分やりたい人もここへ来る。同じことを2つ並べても選べない。 */}
-          <PrimaryButton
-            label="ポモドーロで続ける"
-            sub="25分やって5分休む"
-            onPress={startPomodoro}
-            style={{ marginTop: 64 * gap }}
-          />
-          <QuietButton label="おわる" onPress={stop} style={{ marginTop: 24 * gap }} />
-        </Animated.View>
-      )}
-
-      {/* 押したところから広がって画面を覆い、薄れて消える円。待機中の波紋が
-          最後にひと息で広がりきった、という見立て。消えたあとに数字が現れる。 */}
-      {launching && (
-        <View pointerEvents="none" style={styles.launchOverlay}>
+        {status === 'done' && (
           <Animated.View
-            style={[
-              styles.launchCircle,
-              { left: center.x - LAUNCH_SIZE / 2, top: center.y - LAUNCH_SIZE / 2 },
-              launchStyle,
-            ]}
-          />
-        </View>
-      )}
+            pointerEvents={launching ? 'none' : 'auto'}
+            style={[styles.center, isLandscape && styles.centerLandscape, leaveStyle]}>
+            {!isLandscape && (
+              <Image
+                source={require('./assets/ghost-laugh.png')}
+                style={[styles.ghostLaugh, { marginBottom: 20 * gap }]}
+                accessibilityIgnoresInvertColors
+              />
+            )}
+            <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN 完了</Text>
+            <Text style={[styles.praise, isLandscape && styles.praiseLandscape]}>{praise}</Text>
+            {/* 10分が終わってまだ手が動く人のための続き。ここにしか入口はない。
+              もう10分やりたい人もここへ来る。同じことを2つ並べても選べない。 */}
+            <PrimaryButton
+              label="ポモドーロで続ける"
+              sub="25分やって5分休む"
+              onPress={startPomodoro}
+              style={{ marginTop: 64 * gap }}
+            />
+            <QuietButton label="おわる" onPress={stop} style={{ marginTop: 24 * gap }} />
+          </Animated.View>
+        )}
+
+        {/* 押したところから広がって画面を覆い、薄れて消える円。待機中の波紋が
+          最後にひと息で広がりきった、という見立て。消えたあとに数字が現れる。 */}
+        {launching && (
+          <View pointerEvents="none" style={styles.launchOverlay}>
+            <Animated.View
+              style={[
+                styles.launchCircle,
+                { left: center.x - LAUNCH_SIZE / 2, top: center.y - LAUNCH_SIZE / 2 },
+                launchStyle,
+              ]}
+            />
+          </View>
+        )}
+      </Animated.View>
     </View>
   );
 }

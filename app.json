@@ -42,7 +42,16 @@
       ],
       "expo-asset",
       "expo-font",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FBF5EC",
+          "image": "./assets/splash-ghost.png",
+          "imageWidth": 130,
+          "resizeMode": "contain"
+        }
+      ]
     ],
     "extra": {
       "eas": {
