@@ -14,7 +14,7 @@
 
 ## 動かし方
 
-Expo（SDK 57）で作っています。
+Expo（SDK 58）で作っています。
 
 ```sh
 npm install

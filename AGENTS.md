@@ -1,12 +1,22 @@
 # Expo HAS CHANGED
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+Read the exact versioned docs at https://docs.expo.dev/versions/v58.0.0/ before writing any code.
 
-This project is pinned to **SDK 57** because it is tested on Expo Go for SDK 57. Do not upgrade the
+This project is pinned to **SDK 58** because it is tested on Expo Go for SDK 58. Do not upgrade the
 SDK without the Expo Go app being upgraded first. iOS only ships the latest Expo Go, so when the
 app updates itself, this project has to follow.
 
-Upgraded from SDK 54 on 2026-09-21. Things that changed in 55-57 and now apply here:
+Upgraded from SDK 57 on 2026-11-06 (React Native 0.86 → 0.88). What that changed here:
+
+- React Native's TypeScript API is strict now. Refs are typed by instance types, not by the
+  component: `useRef<ViewInstance>` / `useRef<ScrollViewInstance>`, imported as types from
+  `react-native`. `useRef<View>` no longer type-checks. Deep imports from
+  `react-native/Libraries/*` are type errors too.
+- React Native's own `StatusBar` lost `backgroundColor` / `translucent`. Only `currentHeight` is
+  read here, so nothing to do.
+- Node.js must be 22.13+, 24.3+ or 26+.
+
+Upgraded from SDK 54 on 2026-09-21. Things that changed in 55-57 and still apply here:
 
 - The Legacy Architecture is gone; the New Architecture is mandatory.
 - Android is edge-to-edge always. `App.tsx` still derives its Android top inset from

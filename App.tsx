@@ -13,6 +13,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import type { ScrollViewInstance, ViewInstance } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
@@ -192,7 +193,7 @@ function StartButton({
   const { press, onPressIn, onPressOut } = usePressSink();
   // 厚み。ボタンが小さい端末では一緒に薄くする。
   const depth = Math.round(size * 0.045);
-  const wrapRef = useRef<View>(null);
+  const wrapRef = useRef<ViewInstance>(null);
   // 指が触れたら止めるために、ひとりでに沈む動きをここに持っておく。
   const idleRef = useRef<Animated.CompositeAnimation | null>(null);
   const firedRef = useRef(false);
@@ -374,7 +375,7 @@ function tipsPages() {
 function Tips({ onDismiss }: { onDismiss: () => void }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
-  const pager = useRef<ScrollView>(null);
+  const pager = useRef<ScrollViewInstance>(null);
   const pages = tipsPages();
   const lastPage = pages.length - 1;
 
