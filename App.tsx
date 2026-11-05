@@ -167,11 +167,16 @@ const IDLE_PRESS_GAP_MS = 2000;
 
 // 押してから画面が切り替わるまで。押した実感を見せる間 → 円が広がる、の順。
 // この間にボタンが沈んで弾む。短くすると押した手応えが消える。
-// 全体で 1秒強かける。10分を始める場面なので、急かすより落ち着いて渡したい。
-const LAUNCH_HOLD_MS = 280;
-const LAUNCH_MS = 700;
+// 全体で 1.25秒ほどかける。10分を始める場面なので、急かすより落ち着いて渡したい。
+// 1秒（280 + 700）では「ちょっとはやい」と言われたので、両方を少しずつ延ばした。
+const LAUNCH_HOLD_MS = 400;
+const LAUNCH_MS = 850;
 // 切り替わった先が浮かび上がる時間。
 const ENTER_MS = 420;
+// 「このアプリについて」を閉じてホームへ戻るとき。一瞬で切り替わると、何が起きたのか
+// 分からず不安になる。説明がゆっくり引いてから、ホームが浮かび上がる。
+const TIPS_LEAVE_MS = 360;
+const HOME_ENTER_MS = 520;
 // 広がる円のもとの直径。ここから画面の対角まで引き伸ばす。
 const LAUNCH_SIZE = 100;
 
@@ -378,20 +383,47 @@ function Tips({ onDismiss }: { onDismiss: () => void }) {
   const pager = useRef<ScrollViewInstance>(null);
   const pages = tipsPages();
   const lastPage = pages.length - 1;
+  const leave = useRef(new Animated.Value(1)).current;
+  const leavingRef = useRef(false);
+
+  // 消えきってから親に閉じてもらう。連打で2回閉じない。
+  const close = () => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    Animated.timing(leave, {
+      toValue: 0,
+      duration: TIPS_LEAVE_MS,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start(() => onDismiss());
+  };
 
   // 回転で幅が変わると、ページ何枚ぶんずれた位置に取り残される。合わせ直す。
   useEffect(() => {
     pager.current?.scrollTo({ x: page * width, animated: false });
   }, [width]);
 
+  // ボタンで送っている最中の行き先。アニメーション途中の onScroll はまだ前のページの位置を
+  // 指していて、そのまま拾うと点が「次→前→次」とちらつく。着くまでは無視する。
+  const seekingTo = useRef<number | null>(null);
+
   const goTo = (next: number) => {
     const clamped = Math.max(0, Math.min(lastPage, next));
+    seekingTo.current = clamped;
     setPage(clamped);
     pager.current?.scrollTo({ x: clamped * width, animated: true });
   };
 
   return (
-    <View style={styles.tipsRoot}>
+    <Animated.View
+      pointerEvents={leavingRef.current ? 'none' : 'auto'}
+      style={[
+        styles.tipsRoot,
+        {
+          opacity: leave,
+          transform: [{ scale: leave.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
+        },
+      ]}>
       <ScrollView
         ref={pager}
         horizontal
@@ -400,8 +432,17 @@ function Tips({ onDismiss }: { onDismiss: () => void }) {
         // 慣性の終わりではなく位置そのものから今のページを決める。
         // ゆっくり払うと慣性が出ず、onMomentumScrollEnd は来ないことがある。
         scrollEventThrottle={16}
+        // 送りの途中で指で触ったら、そこからは指の位置に従う。
+        onScrollBeginDrag={() => {
+          seekingTo.current = null;
+        }}
         onScroll={(e) => {
-          const next = Math.round(e.nativeEvent.contentOffset.x / width);
+          const x = e.nativeEvent.contentOffset.x;
+          if (seekingTo.current !== null) {
+            if (Math.abs(x - seekingTo.current * width) > 1) return;
+            seekingTo.current = null;
+          }
+          const next = Math.round(x / width);
           if (next !== page && next >= 0 && next <= lastPage) setPage(next);
         }}>
         {pages.map((content, i) => (
@@ -420,10 +461,10 @@ function Tips({ onDismiss }: { onDismiss: () => void }) {
         </View>
         <PrimaryButton
           label={page === lastPage ? 'わかった' : 'つぎへ'}
-          onPress={() => (page === lastPage ? onDismiss() : goTo(page + 1))}
+          onPress={() => (page === lastPage ? close() : goTo(page + 1))}
         />
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -589,6 +630,9 @@ export default function App() {
   const launch = useRef(new Animated.Value(0)).current;
   // 切り替わった先の画面が浮かび上がるための値。
   const enter = useRef(new Animated.Value(1)).current;
+  // Tips を閉じたあとにホームが浮かび上がるための値。
+  const homeEnter = useRef(new Animated.Value(1)).current;
+  const homeEnterPending = useRef(false);
 
   // サイレントスイッチが入っていても終了音は鳴らす。
   useEffect(() => {
@@ -625,7 +669,21 @@ export default function App() {
     });
   };
 
+  // ホームが描かれてから浮かび上がらせる。描く前に動かすと、出た瞬間には終わっている。
+  useEffect(() => {
+    if (showTips !== false || !homeEnterPending.current) return;
+    homeEnterPending.current = false;
+    Animated.timing(homeEnter, {
+      toValue: 1,
+      duration: HOME_ENTER_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [showTips]);
+
   const dismissTips = () => {
+    homeEnter.setValue(0);
+    homeEnterPending.current = true;
     setShowTips(false);
     AsyncStorage.setItem(TIPS_SEEN_KEY, '1').catch(() => {
       // 保存できなくても今回は閉じる。次回また出るだけで実害はない。
@@ -805,6 +863,11 @@ export default function App() {
     opacity: enter,
     transform: [{ scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
   };
+  // 待機中のホーム。円が広がるときに引く動きと、Tips から戻ったときに浮かぶ動きを重ねる。
+  const homeStyle = {
+    opacity: Animated.multiply(leaveStyle.opacity, homeEnter),
+    transform: [{ scale: homeEnter.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
+  };
   const startSize = Math.min(220, (height - stripHeight) * 0.46);
 
   if (showTips !== false) {
@@ -837,7 +900,7 @@ export default function App() {
       {status === 'idle' && !isLandscape && (
         <Animated.View
           pointerEvents={launching ? 'none' : 'auto'}
-          style={[styles.streakArea, { paddingTop: topInset + 12 }, leaveStyle]}>
+          style={[styles.streakArea, { paddingTop: topInset + 12 }, homeStyle]}>
           <Pressable
             onPress={() => setShowRecord(true)}
             accessibilityRole="button"
@@ -876,7 +939,7 @@ export default function App() {
       {status === 'idle' && (
         <Animated.View
           pointerEvents={launching ? 'none' : 'auto'}
-          style={[styles.center, isLandscape && styles.centerLandscape, leaveStyle]}>
+          style={[styles.center, isLandscape && styles.centerLandscape, homeStyle]}>
           <Text style={[styles.eyebrow, { marginBottom: 48 * gap }]}>10 MIN</Text>
           <StartButton size={startSize} onPress={start} onCenter={setButtonCenter} />
           <Text style={[styles.note, { marginTop: 48 * gap }]}>
