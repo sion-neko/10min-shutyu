@@ -1,4 +1,4 @@
-// 10分をやりきった日の記録。日付まわりだけを集めた、画面に依存しない部分。
+// 10分をやりきった日と、やりきった時間の記録。日付まわりだけを集めた、画面に依存しない部分。
 
 // 1日の区切りは午前4時。深夜1時にやった分は前日として数える。
 export const DAY_START_HOUR = 4;
@@ -104,20 +104,57 @@ export function monthGrid(year: number, month: number): (Date | null)[][] {
   return weeks;
 }
 
-// まだ1日も来ていない週は落とす。今月の残りが空行のまま縦の余白になるのを防ぐ。
-export function monthWeeks(year: number, month: number, todayKey: string) {
-  return monthGrid(year, month).filter((week) =>
-    week.some((date) => date !== null && dayKey(date) <= todayKey),
-  );
+function monthPrefix(year: number, month: number) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-`;
 }
 
 export function countInMonth(cleared: Set<string>, year: number, month: number) {
-  const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+  const prefix = monthPrefix(year, month);
   let count = 0;
   for (const key of cleared) {
     if (key.startsWith(prefix)) count += 1;
   }
   return count;
+}
+
+// 日付ごとの、最後までやりきった分数。10分なら10、ポモドーロの25分なら25を足していく。
+// 途中で離れたぶんは数えない。キーがある日 = 10分をやりきった日。
+export type DayMinutes = Record<string, number>;
+
+export function totalMinutes(days: DayMinutes) {
+  return Object.values(days).reduce((sum, m) => sum + m, 0);
+}
+
+export function minutesInMonth(days: DayMinutes, year: number, month: number) {
+  const prefix = monthPrefix(year, month);
+  let sum = 0;
+  for (const [key, m] of Object.entries(days)) {
+    if (key.startsWith(prefix)) sum += m;
+  }
+  return sum;
+}
+
+// 草の濃さ。その日の分数がこの区切り以下なら、その段になる。超えたら最後の段。
+// 10分だけ／10分＋ポモドーロ1セット／1時間まで／それより多い、の4段。
+export const HEAT_STEPS = [10, 35, 60];
+
+// 1〜4。記録のない日には使わない。
+export function heatLevelOf(minutes: number) {
+  const i = HEAT_STEPS.findIndex((limit) => minutes <= limit);
+  return (i === -1 ? HEAT_STEPS.length : i) + 1;
+}
+
+// 「35分」「1時間」「3時間35分」。
+export function formatMinutes(total: number) {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}分`;
+  return m === 0 ? `${h}時間` : `${h}時間${m}分`;
+}
+
+// 「11月12日（木）」。
+export function dateLabelOf(d: Date) {
+  return `${d.getMonth() + 1}月${d.getDate()}日（${weekdayLabelOf(d)}）`;
 }
 
 // 今年は「8月」だけ。年をまたいだ分だけ「2025年12月」と年を添える。
@@ -134,14 +171,29 @@ export function isDayKey(v: string) {
   return dayKey(new Date(year, month - 1, date)) === v;
 }
 
-export function parseClearedDays(raw: string | null) {
-  if (raw === null) return [];
+// 古い形式（やった日の配列）も読む。時間は残っていないので、その日は10分とみなす。
+const LEGACY_DAY_MINUTES = 10;
+
+export function parseDayMinutes(raw: string | null): DayMinutes {
+  if (raw === null) return {};
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is string => typeof v === 'string' && isDayKey(v));
+    const parsed: unknown = JSON.parse(raw);
+    const days: DayMinutes = {};
+    if (Array.isArray(parsed)) {
+      for (const v of parsed) {
+        if (typeof v === 'string' && isDayKey(v)) days[v] = LEGACY_DAY_MINUTES;
+      }
+      return days;
+    }
+    if (parsed === null || typeof parsed !== 'object') return {};
+    for (const [key, m] of Object.entries(parsed)) {
+      if (isDayKey(key) && typeof m === 'number' && Number.isFinite(m) && m > 0) {
+        days[key] = Math.round(m);
+      }
+    }
+    return days;
   } catch {
     // 壊れていたら空から作り直す。記録は消えるが起動できなくなるよりはいい。
-    return [];
+    return {};
   }
 }

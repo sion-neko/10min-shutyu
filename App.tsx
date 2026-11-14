@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   AppState,
@@ -28,18 +28,23 @@ import {
   bestStreakOf,
   countInMonth,
   currentMonth,
+  dateLabelOf,
   dayKey,
+  formatMinutes,
+  heatLevelOf,
   isCurrentMonth,
   lastDays,
+  minutesInMonth,
+  monthGrid,
   monthLabel,
-  monthWeeks,
-  parseClearedDays,
+  parseDayMinutes,
   shiftMonth,
   streakOf,
   today,
+  totalMinutes,
   weekdayLabelOf,
 } from './record';
-import type { Month } from './record';
+import type { DayMinutes, Month } from './record';
 
 const DURATION_MS = 10 * 60 * 1000;
 // 10分をやりきった人だけが入れる続きの道。ポモドーロ法の 25分集中 → 5分休憩。
@@ -56,7 +61,11 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 SplashScreen.setOptions({ duration: 500, fade: true });
 // 起動画面が引いたあと、最初の画面が浮かび上がる時間。
 const APPEAR_MS = 520;
-const CLEARED_DAYS_KEY = 'clearedDays';
+// 日付ごとのやりきった分数。キー名は日付の一覧だったころのまま（古い形式も読める）。
+const DAY_MINUTES_KEY = 'clearedDays';
+// 記録に足す分数。最後までやりきったぶんだけ数える。
+const RUN_MINUTES = DURATION_MS / 60000;
+const FOCUS_MINUTES = FOCUS_MS / 60000;
 
 const PRAISES = [
   'おつかれさま！',
@@ -190,9 +199,13 @@ const SCREEN_ENTER_MS = 520;
 const LAUNCH_SIZE = 100;
 
 // カレンダーのマス。格子・曜日見出し・ドットの3か所でそろえる必要があるため定数で持つ。
-// 7マス + 6すきま = 7*20 + 6*15 = 230pt。iPhone SE の内寸 311pt に収まる。
-const CELL_SIZE = 20;
-const CELL_GAP = 15;
+// 7マス + 6すきま = 7*30 + 6*11 = 276pt。iPhone SE の内寸 311pt に収まる。
+// 丸の中に日付の数字を入れるので、数字が窮屈にならない大きさにしてある。
+const CELL_SIZE = 30;
+const CELL_GAP = 11;
+// 今日と、タップして選んだ日の輪。丸から少し離して、背景色のすきまを挟む。
+const RING_GAP = 2;
+const RING_WIDTH = 2;
 // 月曜はじまりで1か月がまたぐ週の数の最大。31日の月が日曜はじまりだと6週になる。
 const MAX_WEEKS = 6;
 
@@ -505,30 +518,84 @@ function ArrowButton({
   );
 }
 
+// カレンダーの1マス。やった日だけ丸を塗り、やった時間が長いほど濃くする（草）。
+// やらなかった日と先の日は数字だけ。薄い丸を敷くと、やった日に見えてしまう。
+// 今日はオレンジの輪、タップして選んだ日は焦げ茶の輪で囲む。
+function DayCell({
+  date,
+  minutes,
+  isToday,
+  isFuture,
+  selected,
+  onPress,
+}: {
+  date: Date;
+  minutes: number | undefined;
+  isToday: boolean;
+  isFuture: boolean;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const done = minutes !== undefined;
+  const heat = done ? HEAT[heatLevelOf(minutes) - 1] : null;
+  const label = [dateLabelOf(date), isToday && '今日', done ? formatMinutes(minutes) : '記録なし']
+    .filter(Boolean)
+    .join('、');
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isFuture}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected, disabled: isFuture }}
+      style={[styles.dayCell, heat && { backgroundColor: heat.fill }]}>
+      {(isToday || selected) && (
+        <View pointerEvents="none" style={[styles.dayRing, isToday && styles.dayRingToday]} />
+      )}
+      <Text
+        style={[
+          styles.dayNumber,
+          heat ? { color: heat.text } : isFuture ? styles.dayNumberFuture : styles.dayNumberRest,
+        ]}>
+        {date.getDate()}
+      </Text>
+    </Pressable>
+  );
+}
+
 function MonthCalendar({
   year,
   month,
-  cleared,
+  days,
   todayKey,
+  selectedKey,
+  onSelect,
 }: {
   year: number;
   month: number;
-  cleared: Set<string>;
+  days: DayMinutes;
   todayKey: string;
+  selectedKey: string;
+  onSelect: (key: string) => void;
 }) {
   return (
     <View style={styles.month}>
-      {monthWeeks(year, month, todayKey).map((week, row) => (
+      {monthGrid(year, month).map((week, row) => (
         <View key={row} style={styles.gridRow}>
           {week.map((date, col) => {
-            // 月の前後にはみ出したマスと未来の日は、場所だけ空けて何も描かない。
-            const key = date && dayKey(date);
-            if (!key || key > todayKey) {
-              return <View key={col} style={styles.gridCell} />;
-            }
+            // 月の前後にはみ出したマスは、場所だけ空けて何も描かない。
+            if (!date) return <View key={col} style={styles.gridCell} />;
+            const key = dayKey(date);
             return (
               <View key={col} style={styles.gridCell}>
-                <Dot done={cleared.has(key)} isToday={key === todayKey} size={CELL_SIZE} />
+                <DayCell
+                  date={date}
+                  minutes={days[key]}
+                  isToday={key === todayKey}
+                  isFuture={key > todayKey}
+                  selected={key === selectedKey}
+                  onPress={() => onSelect(key)}
+                />
               </View>
             );
           })}
@@ -538,40 +605,105 @@ function MonthCalendar({
   );
 }
 
-function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () => void }) {
+// 「3 時間 35 分」の数字だけを大きく、単位を小さく出す。
+function DurationValue({ minutes }: { minutes: number }) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return (
+    <Text style={styles.totalValue}>
+      {h > 0 && (
+        <>
+          {h}
+          <Text style={styles.totalUnit}> 時間 </Text>
+        </>
+      )}
+      {(h === 0 || m > 0) && (
+        <>
+          {m}
+          <Text style={styles.totalUnit}> 分</Text>
+        </>
+      )}
+    </Text>
+  );
+}
+
+// 草の濃さの目安。やらなかった日は丸がないので、やった日の4段だけを並べる。
+function HeatLegend() {
+  return (
+    <View
+      style={styles.heatLegend}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants">
+      <Text style={styles.heatLegendText}>少ない</Text>
+      {HEAT.map(({ fill }) => (
+        <View key={fill} style={[styles.heatSwatch, { backgroundColor: fill }]} />
+      ))}
+      <Text style={styles.heatLegendText}>多い</Text>
+    </View>
+  );
+}
+
+function Record({
+  days,
+  cleared,
+  onDismiss,
+}: {
+  days: DayMinutes;
+  cleared: Set<string>;
+  onDismiss: () => void;
+}) {
   const todayKey = dayKey(today());
   const streak = streakOf(cleared);
   const best = bestStreakOf(cleared);
   // 表示中の月。過去は好きなだけさかのぼれる。今月より先には記録が存在しない。
   const [month, setMonth] = useState<Month>(currentMonth);
   const monthCount = countInMonth(cleared, month.year, month.month);
+  const monthMinutes = minutesInMonth(days, month.year, month.month);
+  // タップして選んだ日。開いたときは今日。月を送っても選んだ日はそのまま残す。
+  const [selectedKey, setSelectedKey] = useState(todayKey);
+  const [sy, sm, sd] = selectedKey.split('-').map(Number);
+  const selectedDate = new Date(sy, sm - 1, sd);
+  const selectedMinutes = days[selectedKey];
 
   return (
     <View style={styles.recordRoot}>
       <ScrollView style={styles.recordScroll} contentContainerStyle={styles.record}>
         <Text style={styles.recordTitle}>きろく</Text>
 
-        <View style={styles.stats}>
-          {[
-            { label: '連続日数', value: streak },
-            { label: '最高日数', value: best },
-            { label: '通算日数', value: cleared.size },
-          ].map(({ label, value }) => (
-            <View key={label} style={styles.statRow}>
-              <Text style={styles.statLabel}>{label}</Text>
-              <Text style={styles.statValue}>
-                {value}
-                <Text style={styles.statUnit}> 日</Text>
-              </Text>
-            </View>
-          ))}
+        {/* 毎日開いて見たいのは連続日数なので、これだけを大きく。最高はその添え書き。 */}
+        <View style={styles.streakHero}>
+          <View style={styles.streakHeroRow}>
+            <Flame size={30} lit={streak > 0} />
+            <Text style={styles.streakHeroValue}>
+              {streak}
+              <Text style={styles.streakHeroUnit}> 日連続</Text>
+            </Text>
+          </View>
+          <Text style={styles.streakHeroBest}>いままでの最高 {best}日</Text>
+        </View>
+
+        {/* これまでの積み上げ。日数と時間を同じ大きさの札に並べる。 */}
+        <View style={styles.totals}>
+          <View style={styles.totalCard}>
+            <Text style={styles.totalLabel}>通算</Text>
+            <Text style={styles.totalValue}>
+              {cleared.size}
+              <Text style={styles.totalUnit}> 日</Text>
+            </Text>
+          </View>
+          <View style={styles.totalCard}>
+            <Text style={styles.totalLabel}>通算</Text>
+            <DurationValue minutes={totalMinutes(days)} />
+          </View>
         </View>
 
         <View style={styles.monthNav}>
           <ArrowButton label="←" hint="前の月" onPress={() => setMonth(shiftMonth(month, -1))} />
           <View style={styles.monthTitle}>
             <Text style={styles.monthLabel}>{monthLabel(month.year, month.month)}</Text>
-            <Text style={styles.monthCount}>{monthCount > 0 ? `${monthCount}日` : ' '}</Text>
+            <Text style={styles.monthCount}>
+              {monthCount > 0 ? `${monthCount}日・${formatMinutes(monthMinutes)}` : ' '}
+            </Text>
           </View>
           <ArrowButton
             label="→"
@@ -593,14 +725,23 @@ function Record({ cleared, onDismiss }: { cleared: Set<string>; onDismiss: () =>
         <MonthCalendar
           year={month.year}
           month={month.month}
-          cleared={cleared}
+          days={days}
           todayKey={todayKey}
+          selectedKey={selectedKey}
+          onSelect={setSelectedKey}
         />
+        <HeatLegend />
 
-        <Text style={styles.recordNote}>
-          10分を最後までやりきった日に印がつきます。{'\n'}
-          1日に何回やってもその日は1つです。
-        </Text>
+        {/* 選んだ日の時間。内訳は出さず、やりきった時間の合計だけ。 */}
+        <View style={styles.dayCard}>
+          <Text style={styles.dayCardLabel}>
+            {dateLabelOf(selectedDate)}
+            {selectedKey === todayKey ? '・今日' : ''}
+          </Text>
+          <Text style={styles.dayCardValue}>
+            {selectedMinutes === undefined ? '—' : formatMinutes(selectedMinutes)}
+          </Text>
+        </View>
       </ScrollView>
 
       {/* 記録が何年ぶんにもなるので、とじるだけはスクロールの外に出して常に届かせる。 */}
@@ -621,10 +762,12 @@ export default function App() {
   // null は読み込み中。一瞬ホーム画面が見えてから Tips が出るのを避ける。
   const [showTips, setShowTips] = useState<boolean | null>(null);
   const [showRecord, setShowRecord] = useState(false);
-  const [cleared, setCleared] = useState<Set<string>>(() => new Set());
+  const [days, setDays] = useState<DayMinutes>({});
+  // 連続日数などは「やった日」だけで決まる。記録のある日 = 10分をやりきった日。
+  const cleared = useMemo(() => new Set(Object.keys(days)), [days]);
   const endAtRef = useRef(0);
   // 記録は完了時に読み書きするので、state とは別に最新値を同期で持っておく。
-  const clearedRef = useRef<Set<string>>(cleared);
+  const daysRef = useRef<DayMinutes>(days);
   const chime = useAudioPlayer(require('./assets/chime.wav'));
   const pon = useAudioPlayer(require('./assets/pon.wav'));
   // 開始音だけは合成ではなく既成の効果音。くらげ工匠(kurage-kosho.info)の
@@ -666,22 +809,25 @@ export default function App() {
   // 記録が読めなくても10分は測れる。空のまま進めて起動は止めない。
   // 読み込み中に完了した日があっても消さないよう、上書きではなく足し合わせる。
   useEffect(() => {
-    AsyncStorage.getItem(CLEARED_DAYS_KEY)
+    AsyncStorage.getItem(DAY_MINUTES_KEY)
       .then((raw) => {
-        const merged = new Set([...parseClearedDays(raw), ...clearedRef.current]);
-        clearedRef.current = merged;
-        setCleared(merged);
+        const merged = parseDayMinutes(raw);
+        for (const [key, m] of Object.entries(daysRef.current)) {
+          merged[key] = (merged[key] ?? 0) + m;
+        }
+        daysRef.current = merged;
+        setDays(merged);
       })
       .catch(() => {});
   }, []);
 
-  const recordToday = () => {
+  // やりきったぶんの分数を今日に足す。10分のほうで初めて今日の印がつく。
+  const recordMinutes = (minutes: number) => {
     const key = dayKey(today());
-    if (clearedRef.current.has(key)) return;
-    const next = new Set(clearedRef.current).add(key);
-    clearedRef.current = next;
-    setCleared(next);
-    AsyncStorage.setItem(CLEARED_DAYS_KEY, JSON.stringify([...next].sort())).catch(() => {
+    const next = { ...daysRef.current, [key]: (daysRef.current[key] ?? 0) + minutes };
+    daysRef.current = next;
+    setDays(next);
+    AsyncStorage.setItem(DAY_MINUTES_KEY, JSON.stringify(next)).catch(() => {
       // 保存できなくても今回の10分は成立している。記録だけ諦める。
     });
   };
@@ -788,9 +934,10 @@ export default function App() {
         setPraise((prev) => pickPraise(prev));
         setStatus('done');
         // 記録は10分をやりきった日に付く。ポモドーロはこの完了画面からしか
-        // 始められないので、25分のほうで付け直す必要はない。
-        recordToday();
+        // 始められないので、25分のほうは時間を足すだけになる。
+        recordMinutes(RUN_MINUTES);
       } else if (status === 'focus') {
+        recordMinutes(FOCUS_MINUTES);
         startPhase('break');
       } else {
         // 休憩明けはタップを待たずに次の25分へ入る。離れたらリセットである以上
@@ -954,7 +1101,11 @@ export default function App() {
       <View style={styles.root}>
         <StatusBar style="dark" />
         <Animated.View pointerEvents={switching ? 'none' : 'auto'} style={screenStyle}>
-          <Record cleared={cleared} onDismiss={() => switchScreen(() => setShowRecord(false))} />
+          <Record
+            days={days}
+            cleared={cleared}
+            onDismiss={() => switchScreen(() => setShowRecord(false))}
+          />
         </Animated.View>
       </View>
     );
@@ -1164,6 +1315,16 @@ const CARD = '#FFFFFF';
 const DOT_ON = 'rgba(46, 38, 32, 0.72)';
 const DOT_OFF = 'rgba(46, 38, 32, 0.1)';
 const DOT_TODAY = 'rgba(46, 38, 32, 0.28)';
+// きろくのカレンダーの、まだ来ていない日の数字。
+const DAY_FUTURE = 'rgba(46, 38, 32, 0.3)';
+// 草の4段。焦げ茶の濃淡で、薄い2段は焦げ茶の数字、濃い2段はクリームの数字にする。
+// 色を変えるときはここだけ差し替えれば、カレンダーと凡例の両方に効く。
+const HEAT = [
+  { fill: 'rgba(46, 38, 32, 0.22)', text: INK },
+  { fill: 'rgba(46, 38, 32, 0.42)', text: INK },
+  { fill: 'rgba(46, 38, 32, 0.64)', text: BG },
+  { fill: 'rgba(46, 38, 32, 0.88)', text: BG },
+];
 const WEEKDAY = 'rgba(46, 38, 32, 0.5)';
 
 const styles = StyleSheet.create({
@@ -1406,32 +1567,58 @@ const styles = StyleSheet.create({
     color: TEXT,
     fontSize: 30,
     fontWeight: '300',
-    marginBottom: 36,
+    marginBottom: 28,
   },
-  // ラベルを左、数を右。等幅数字なので桁がそろう。
-  stats: {
-    width: 208,
-    gap: 14,
-    marginBottom: 44,
+  streakHero: {
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 20,
   },
-  statRow: {
+  streakHeroRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    gap: 10,
   },
-  statLabel: {
-    color: MUTED,
-    fontSize: 15,
-  },
-  statValue: {
+  streakHeroValue: {
     color: TEXT,
-    fontSize: 32,
+    fontSize: 56,
     fontWeight: '200',
     fontVariant: ['tabular-nums'],
   },
-  statUnit: {
+  streakHeroUnit: {
     color: MUTED,
-    fontSize: 15,
+    fontSize: 18,
+  },
+  streakHeroBest: {
+    color: MUTED,
+    fontSize: 13,
+  },
+  totals: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 32,
+  },
+  totalCard: {
+    width: 133,
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: CARD,
+    borderRadius: 14,
+    paddingVertical: 10,
+  },
+  totalLabel: {
+    color: MUTED,
+    fontSize: 12,
+  },
+  totalValue: {
+    color: TEXT,
+    fontSize: 22,
+    fontWeight: '300',
+    fontVariant: ['tabular-nums'],
+  },
+  totalUnit: {
+    color: MUTED,
+    fontSize: 13,
   },
   // 月によって4〜6行（今月は先の週を描かないのでもっと少ない）と変わる。高さが変わると
   // 月を送るたびに下の説明が上下して目障りなので、いちばん多い6行ぶんをいつも取っておく。
@@ -1439,7 +1626,24 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: CELL_GAP,
     minHeight: MAX_WEEKS * CELL_SIZE + (MAX_WEEKS - 1) * CELL_GAP,
-    marginBottom: 32,
+    marginBottom: 12,
+  },
+  heatLegend: {
+    width: WEEK_DAYS * CELL_SIZE + (WEEK_DAYS - 1) * CELL_GAP,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 16,
+  },
+  heatLegendText: {
+    color: WEEKDAY,
+    fontSize: 11,
+  },
+  heatSwatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
   monthNav: {
     flexDirection: 'row',
@@ -1481,6 +1685,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  dayCell: {
+    width: CELL_SIZE,
+    height: CELL_SIZE,
+    borderRadius: CELL_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 丸の外側に、背景色のすきまを挟んで描く輪。マスの大きさは変えない。
+  dayRing: {
+    position: 'absolute',
+    top: -(RING_GAP + RING_WIDTH),
+    left: -(RING_GAP + RING_WIDTH),
+    width: CELL_SIZE + (RING_GAP + RING_WIDTH) * 2,
+    height: CELL_SIZE + (RING_GAP + RING_WIDTH) * 2,
+    borderRadius: (CELL_SIZE + (RING_GAP + RING_WIDTH) * 2) / 2,
+    borderWidth: RING_WIDTH - 0.5,
+    borderColor: INK,
+  },
+  // 今日は選んでいてもオレンジのまま。どこが今日かを見失わない。
+  dayRingToday: {
+    borderWidth: RING_WIDTH,
+    borderColor: ACCENT_EDGE,
+  },
+  dayNumber: {
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+  },
+  dayNumberRest: {
+    color: MUTED,
+  },
+  dayNumberFuture: {
+    color: DAY_FUTURE,
+  },
+  dayCard: {
+    width: WEEK_DAYS * CELL_SIZE + (WEEK_DAYS - 1) * CELL_GAP,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    backgroundColor: CARD,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 24,
+  },
+  dayCardLabel: {
+    color: MUTED,
+    fontSize: 14,
+  },
+  dayCardValue: {
+    color: TEXT,
+    fontSize: 22,
+    fontWeight: '300',
+    fontVariant: ['tabular-nums'],
+  },
   weekdayRow: {
     marginBottom: 16,
   },
@@ -1489,13 +1747,6 @@ const styles = StyleSheet.create({
     color: WEEKDAY,
     fontSize: 11,
     textAlign: 'center',
-  },
-  recordNote: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 22,
-    textAlign: 'center',
-    marginTop: 8,
   },
   tipsRoot: {
     flex: 1,
