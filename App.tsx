@@ -193,6 +193,8 @@ const LAUNCH_SIZE = 100;
 // 7マス + 6すきま = 7*20 + 6*15 = 230pt。iPhone SE の内寸 311pt に収まる。
 const CELL_SIZE = 20;
 const CELL_GAP = 15;
+// 月曜はじまりで1か月がまたぐ週の数の最大。31日の月が日曜はじまりだと6週になる。
+const MAX_WEEKS = 6;
 
 // 何も起きていない画面で唯一動いているものが、押してほしいボタン。
 function StartButton({
@@ -1431,9 +1433,12 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 15,
   },
+  // 月によって4〜6行（今月は先の週を描かないのでもっと少ない）と変わる。高さが変わると
+  // 月を送るたびに下の説明が上下して目障りなので、いちばん多い6行ぶんをいつも取っておく。
   month: {
     alignItems: 'flex-start',
     gap: CELL_GAP,
+    minHeight: MAX_WEEKS * CELL_SIZE + (MAX_WEEKS - 1) * CELL_GAP,
     marginBottom: 32,
   },
   monthNav: {
